@@ -1,11 +1,11 @@
-# 🧠 Ada
+#  Ada
 
 > **A fast, local-first document intelligence agent and desktop assistant.**  
 > Grounded question answering, hybrid RAG over real-world business formats, automated file organization, and real deliverable generation — running 100% on your machine.
 
 ---
 
-## ⚡ What is Ada in 30 Seconds?
+##  What is Ada in 30 Seconds?
 
 Imagine having a research analyst on your desktop who has read every PDF, spreadsheet, presentation, document, and code file in your work folders. 
 
@@ -15,46 +15,46 @@ You can ask Ada questions in natural language, request audits, extract hard-to-f
 
 ---
 
-## ✨ Key Features
+##  Key Features
 
-- 🔒 **100% Local & Privacy-First**  
+-  **100% Local & Privacy-First**  
   Zero cloud dependencies required. Runs locally with Ollama (`hermes3:latest` for chat/tools, `nomic-embed-text` for embeddings, and `moondream` for vision) or seamlessly swaps to hosted OpenAI-compatible endpoints (OpenRouter, NVIDIA NIM, vLLM).
 
-- 🎯 **Hallucination-Proof Grounding & Citation Verification**  
+-  **Hallucination-Proof Grounding & Citation Verification**  
   Every answer links back to exact files and page numbers (`[document.pdf:p.4]`). Claims, numbers, and physical units are deterministically validated in code against tool outputs — ungrounded citations and hallucinated figures are caught before reaching the user.
 
-- ⚡ **Hybrid Search (Dense Vectors + BM25 via RRF)**  
+-  **Hybrid Search (Dense Vectors + BM25 via RRF)**  
   Pure vector search fails silently on exact part numbers, SKU codes, and monetary figures (e.g., confusing `DWG-11483` with `DWG-11482`). Ada fuses dense embeddings (ChromaDB) with sparse keyword search (SQLite FTS5) using **Reciprocal Rank Fusion (RRF)**.
 
-- 📊 **Multi-Format Business Ingestion**  
+-  **Multi-Format Business Ingestion**  
   Understands complex real-world files:
   - **PDFs**: Fast rendering and layout extraction via `pypdfium2` (permissive BSD-3 licensing).
   - **Spreadsheets (`.xlsx`, `.csv`, `.tsv`)**: Emits schema summaries and row-group chunks so queries hit specific rows rather than full-sheet data dumps.
   - **Presentations & Docs (`.pptx`, `.docx`)**: Extracts structured sections and bullet hierarchies.
   - **Images & Code**: Visual OCR cascade and multi-language syntax chunking.
 
-- 🤖 **Resilient 2-Hop Agent Loop**  
+-  **Resilient 2-Hop Agent Loop**  
   Streams thoughts, tool calls, and tokens in real time over Server-Sent Events (SSE). Uses an 8-tool set designed for 8B models with a "reconnaissance first, deep read second" strategy. Tools never throw unhandled crashes — they return actionable guidance so the model self-corrects.
 
-- 📝 **Live Deliverable Generation**  
+-  **Live Deliverable Generation**  
   Can directly produce real, openable files in your output directory:
-  - 📊 **Excel Workbooks** (`.xlsx`) with typed columns and formatted numbers.
-  - 📄 **Word Documents** (`.docx`) with structured headings and tables.
-  - 📽️ **PowerPoint Presentations** (`.pptx`) with slides and bullet points.
-  - 📝 **Markdown Documents** (`.md`).
+  -  **Excel Workbooks** (`.xlsx`) with typed columns and formatted numbers.
+  -  **Word Documents** (`.docx`) with structured headings and tables.
+  -  **PowerPoint Presentations** (`.pptx`) with slides and bullet points.
+  -  **Markdown Documents** (`.md`).
 
-- 🗂️ **Universal Multi-Format File Organizer**  
+-  **Universal Multi-Format File Organizer**  
   Inspects messy directories, classifies loose files across **all formats** (PDFs, Office documents, spreadsheets, presentations, images, audio, video, archives, code, installers, and other formats), and presents non-destructive move suggestions for explicit review before applying.
 
-- 🌐 **Modern Frontend Options (Django + React)**  
+-  **Modern Frontend Options **  
   Full-featured Django web application with real-time SSE chat streaming, direct **document & PDF file upload and deletion**, multi-format file organizer, and RAG evaluation dashboard — plus the React 19 + Electron desktop app.
 
-- 📈 **Dynamic RAG Evaluation Benchmark (Zero Dummy Data)**  
+-  **Dynamic RAG Evaluation Benchmark **  
   Evaluates the 4 core pillars of retrieval-augmented generation (Retrieval Accuracy, Answer Correctness, Faithfulness, and Latency) using **questions extracted dynamically from your actual uploaded PDFs**, ensuring benchmark results reflect your real production documents.
 
 ---
 
-## 🏗️ Architecture Overview
+##  Architecture Overview
 
 ```mermaid
 flowchart TD
@@ -85,7 +85,7 @@ flowchart TD
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### 1. Prerequisites
 
@@ -151,7 +151,7 @@ npm run dev
 
 ---
 
-## ⚙️ Configuration (`.env`)
+##  Configuration (`.env`)
 
 Ada requires zero configuration to run locally with Ollama. If you want to customize models or use cloud providers, create a `.env` file in `backend/`:
 
@@ -174,7 +174,7 @@ EMBED_BATCH=64
 
 ---
 
-## 📁 Supported File Formats
+##  Supported File Formats
 
 | Format | Extensions | Ingestion Method |
 |---|---|---|
@@ -187,7 +187,7 @@ EMBED_BATCH=64
 
 ---
 
-## 💡 Key Engineering Decisions
+##  Key Engineering Decisions
 
 1. **Explicit `127.0.0.1` Binding**  
    On Windows, `localhost` attempts IPv6 (`::1`) first before timing out to IPv4. Ollama binds IPv4 only, causing a ~2.0-second SYN retry penalty on every single request. Pinning `127.0.0.1` dropped roundtrip latency from 2030ms to 0.8ms.
@@ -200,7 +200,7 @@ EMBED_BATCH=64
 
 ---
 
-## 🧪 Testing & Verification
+##  Testing & Verification
 
 Ada includes automated smoke tests, agent behavioural benchmarks, and a comprehensive RAG evaluation suite:
 
@@ -248,6 +248,6 @@ The evaluation suite can also be invoked or inspected via HTTP:
 
 ---
 
-## 📄 License
+##  License
 
 Distributed under the MIT License. See `LICENSE` for more information.
