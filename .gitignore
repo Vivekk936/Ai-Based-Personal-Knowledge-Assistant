@@ -1,0 +1,142 @@
+# ==============================================================================
+# Ada — Git Ignore Configuration
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Python & Bytecode
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ------------------------------------------------------------------------------
+# Virtual Environments
+# ------------------------------------------------------------------------------
+.venv/
+venv/
+ENV/
+env/
+*/venv/
+*/.venv/
+backend/venv/
+backend/.venv/
+django_frontend/venv/
+django_frontend/.venv/
+
+# ------------------------------------------------------------------------------
+# Environment Variables & Secrets
+# ------------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# ------------------------------------------------------------------------------
+# Databases & SQLite
+# ------------------------------------------------------------------------------
+*.sqlite3
+*.sqlite
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+db.sqlite3
+django_frontend/db.sqlite3
+
+# ------------------------------------------------------------------------------
+# Ada Application Data, Vector Database & Uploads
+# ------------------------------------------------------------------------------
+ada_data/
+**/ada_data/
+backend/ada_data/
+backend/data/
+chroma_db/
+chroma_db_test*/
+vectors/
+**/vectors/
+uploads/
+**/uploads/
+eval_uploads/
+**/eval_uploads/
+eval_rag_results.json
+backend/eval_rag_results.json
+
+# ------------------------------------------------------------------------------
+# Django Framework
+# ------------------------------------------------------------------------------
+local_settings.py
+staticfiles/
+static_root/
+media/
+
+# ------------------------------------------------------------------------------
+# Testing, Coverage & Profiling
+# ------------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+nosetests.xml
+*.cover
+*.py,cover
+
+# ------------------------------------------------------------------------------
+# IDEs & Code Editors
+# ------------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# ------------------------------------------------------------------------------
+# Node / Frontend Artifacts
+# ------------------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ------------------------------------------------------------------------------
+# Operating System Files
+# ------------------------------------------------------------------------------
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ------------------------------------------------------------------------------
+# Automation & Assistants
+# ------------------------------------------------------------------------------
+.claude/scheduled_tasks.lock

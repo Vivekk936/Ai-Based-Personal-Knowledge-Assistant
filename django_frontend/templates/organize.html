@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+
+{% block title %}Smart File Organizer — Ada{% endblock %}
+
+{% block content %}
+<div class="flex-1 flex flex-col h-full overflow-hidden bg-dark-950">
+
+  <!-- Header -->
+  <header class="h-14 border-b border-slate-800/80 px-6 flex items-center justify-between bg-dark-900/60 backdrop-blur shrink-0">
+    <div class="flex items-center gap-3">
+      <h1 class="text-sm font-semibold text-slate-200">Smart File Organizer</h1>
+      <span class="text-xs text-slate-500">• Automated Taxonomy & Safe Move Review</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <select id="folder-selector" class="bg-dark-800 text-xs text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 outline-none">
+        <option value="">Select a granted folder...</option>
+      </select>
+      <button onclick="analyzeFolder()" id="analyze-btn" class="text-xs bg-sky-600 hover:bg-sky-500 text-white font-medium px-3.5 py-1.5 rounded-lg transition-colors flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <span>Analyze Folder</span>
+      </button>
+      <button onclick="applySelected()" id="apply-btn" disabled class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3.5 py-1.5 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        <span>Apply Moves</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Body -->
+  <div class="flex-1 overflow-y-auto p-6 max-w-6xl w-full mx-auto space-y-6">
+
+    <!-- Overview Card -->
+    <div class="bg-dark-900 border border-slate-800 rounded-2xl p-5 shadow-sm">
+      <h2 class="text-sm font-semibold text-slate-200 mb-1">Universal Multi-Format File Organizer</h2>
+      <p class="text-xs text-slate-400 leading-relaxed">
+        Ada analyzes chaotic work directories, detects loose files of <strong>all types — including PDFs, Office documents, spreadsheets, presentations, images, media, archives, code, and other loose files</strong> — and proposes non-destructive moves into clean categorized folders. <strong>No file is moved without your explicit review and approval.</strong>
+      </p>
+    </div>
+
+    <!-- Loading status -->
+    <div id="loading-spinner" class="hidden text-center py-12 text-slate-400 space-y-3">
+      <div class="inline-block w-8 h-8 border-2 border-sky-400 border-t-transparent rounded-full animate-spin"></div>
+      <div class="text-xs">Analyzing directory taxonomy across all file types...</div>
+    </div>
+
+    <!-- Suggestions Table -->
+    <div id="results-card" class="hidden bg-dark-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+      <div class="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-semibold text-slate-200">Suggested File Moves</span>
+          <span id="suggestions-count-badge" class="text-xs bg-sky-950 text-sky-400 border border-sky-800 px-2 py-0.5 rounded-full font-mono">0 items</span>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <button onclick="toggleSelectAll(true)" class="text-sky-400 hover:text-sky-300">Select All</button>
+          <span class="text-slate-600">|</span>
+          <button onclick="toggleSelectAll(false)" class="text-slate-400 hover:text-slate-300">Deselect All</button>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-dark-850/80 text-slate-400 uppercase font-mono text-[10px] tracking-wider border-b border-slate-800">
+            <tr>
+              <th class="p-3 w-10 text-center"><input type="checkbox" id="master-checkbox" onchange="toggleSelectAll(this.checked)"></th>
+              <th class="p-3">Category</th>
+              <th class="p-3">Source File</th>
+              <th class="p-3">Suggested Destination</th>
+              <th class="p-3">Reason</th>
+            </tr>
+          </thead>
+          <tbody id="suggestions-tbody" class="divide-y divide-slate-800 text-slate-300">
+            <!-- Populated via JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Empty State -->
+    <div id="empty-state" class="text-center py-16 text-slate-500 text-xs">
+      Select a granted folder from the dropdown above and click "Analyze Folder" to inspect suggestions.
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  let currentSuggestions = [];
+
+  async function populateFolderDropdown() {
+    try {
+      const res = await fetch('/api/folders');
+      const data = await res.json();
+      const sel = document.getElementById('folder-selector');
+      sel.innerHTML = '<option value="">Select a granted folder...</option>';
+      if (data.granted && data.granted.length > 0) {
+        data.granted.forEach(f => {
+          const opt = document.createElement('option');
+          opt.value = f;
+          opt.innerText = f;
+          sel.appendChild(opt);
+        });
+      }
+    } catch (e) {}
+  }
+
+  async function analyzeFolder() {
+    const sel = document.getElementById('folder-selector');
+    const folder = sel.value;
+    if (!folder) {
+      alert('Please select a folder first.');
+      return;
+    }
+
+    const spinner = document.getElementById('loading-spinner');
+    const results = document.getElementById('results-card');
+    const empty = document.getElementById('empty-state');
+    const applyBtn = document.getElementById('apply-btn');
+
+    spinner.classList.remove('hidden');
+    results.classList.add('hidden');
+    empty.classList.add('hidden');
+    applyBtn.disabled = true;
+
+    try {
+      const resp = await fetch('/api/folders/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: folder })
+      });
+      const data = await resp.json();
+      spinner.classList.add('hidden');
+
+      currentSuggestions = data.suggestions || [];
+      document.getElementById('suggestions-count-badge').innerText = `${currentSuggestions.length} items`;
+
+      if (currentSuggestions.length === 0) {
+        empty.innerText = 'No organization moves needed! This folder is already neatly organized.';
+        empty.classList.remove('hidden');
+        return;
+      }
+
+      const tbody = document.getElementById('suggestions-tbody');
+      tbody.innerHTML = currentSuggestions.map((s, idx) => `
+        <tr class="hover:bg-slate-800/40 transition-colors">
+          <td class="p-3 text-center">
+            <input type="checkbox" class="row-checkbox" data-index="${idx}" checked onchange="updateApplyState()">
+          </td>
+          <td class="p-3">
+            <span class="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-slate-800 text-sky-400 border border-slate-700">${s.category || 'Other'}</span>
+          </td>
+          <td class="p-3 font-mono text-[11px] text-slate-200">${s.path}</td>
+          <td class="p-3 font-mono text-[11px] text-emerald-400">${s.suggested_destination}</td>
+          <td class="p-3 text-slate-400 text-xs">${s.reason || 'Categorized by document type'}</td>
+        </tr>
+      `).join('');
+
+      results.classList.remove('hidden');
+      applyBtn.disabled = false;
+
+    } catch (e) {
+      spinner.classList.add('hidden');
+      empty.innerText = 'Error analyzing folder: ' + e;
+      empty.classList.remove('hidden');
+    }
+  }
+
+  function toggleSelectAll(checked) {
+    document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = checked);
+    document.getElementById('master-checkbox').checked = checked;
+    updateApplyState();
+  }
+
+  function updateApplyState() {
+    const anyChecked = Array.from(document.querySelectorAll('.row-checkbox')).some(cb => cb.checked);
+    document.getElementById('apply-btn').disabled = !anyChecked;
+  }
+
+  async function applySelected() {
+    const selectedIndices = Array.from(document.querySelectorAll('.row-checkbox:checked'))
+      .map(cb => parseInt(cb.getAttribute('data-index')));
+
+    if (selectedIndices.length === 0) return;
+    const movesToApply = selectedIndices.map(i => currentSuggestions[i]);
+
+    if (!confirm(`Apply ${movesToApply.length} file moves?`)) return;
+
+    const applyBtn = document.getElementById('apply-btn');
+    applyBtn.disabled = true;
+    applyBtn.innerText = 'Applying...';
+
+    try {
+      const res = await fetch('/api/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: movesToApply })
+      });
+      const data = await res.json();
+      alert(`Applied ${data.applied || 0} moves successfully! (${data.skipped || 0} skipped, ${data.errors ? data.errors.length : 0} errors).`);
+      analyzeFolder(); // refresh
+    } catch (e) {
+      alert('Error applying moves: ' + e);
+    } finally {
+      applyBtn.innerText = 'Apply Moves';
+    }
+  }
+
+  populateFolderDropdown();
+</script>
+{% endblock %}
+

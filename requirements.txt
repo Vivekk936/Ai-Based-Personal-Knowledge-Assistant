@@ -1,0 +1,31 @@
+# ==============================================================================
+# Ada: Dependencies
+# ==============================================================================
+
+# Core Framework & Backend Server
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+pydantic>=2.7.0
+python-dotenv>=1.0.0
+
+# Frontend (Django Web Framework)
+django>=5.0.0
+
+# LLM, Agent Harness & Vector Database
+openai>=1.40.0
+chromadb>=0.5.0
+
+# Document Ingestion, Parsing & Office Deliverables
+# Note: pypdfium2 (BSD-3/Apache-2.0) replaces AGPL-licensed alternatives to ensure
+# enterprise-friendly, fully permissive licensing across all document pipelines.
+pypdfium2>=4.30.0
+python-docx>=1.1.0
+openpyxl>=3.1.0
+python-pptx>=1.0.0
+XlsxWriter>=3.2.0
+Pillow>=10.3.0
+
+# Evaluation, Networking & Testing Utilities
+httpx>=0.27.0
+pytest>=8.0.0
