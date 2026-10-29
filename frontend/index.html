@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- No webfont link on purpose. This app's whole promise is that nothing leaves the
+         machine, and a Google Fonts request on every launch breaks that before the user
+         has typed anything — it also stalls the first paint on an air-gapped box waiting
+         for a DNS lookup that will never resolve. The font stack in index.css falls back
+         to system-ui, which is Segoe UI Variable here. To have Plus Jakarta Sans back,
+         vendor the .woff2 files into the bundle and @font-face them locally. -->
+    <title>Ada</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

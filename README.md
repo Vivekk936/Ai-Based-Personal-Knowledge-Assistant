@@ -1,68 +1,66 @@
-#  Ada
+# Ada
 
 > **A fast, local-first document intelligence agent and desktop assistant.**  
-> Grounded question answering, hybrid RAG over real-world business formats, automated file organization, and real deliverable generation — running 100% on your machine.
+> Grounded question answering, hybrid RAG over real-world business formats, automated file organization, and real deliverable generation — powered by high-throughput NVIDIA NIM models.
 
 ---
 
-##  What is Ada in 30 Seconds?
+## What is Ada?
 
 Imagine having a research analyst on your desktop who has read every PDF, spreadsheet, presentation, document, and code file in your work folders. 
 
 You can ask Ada questions in natural language, request audits, extract hard-to-find metrics, reorganize messy directories, or generate formatted Excel sheets, Word reports, and slide decks. 
 
-**No data ever leaves your computer.** Ada runs against local Ollama models by default, with code-level citation verification ensuring that every single claim is backed by real page-level evidence.
+Ada connects directly to high-throughput NVIDIA NIM models via the official NVIDIA API, with code-level citation verification ensuring that every single claim is backed by real page-level evidence.
 
 ---
 
-##  Key Features
+## Key Features
 
--  **100% Local & Privacy-First**  
-  Zero cloud dependencies required. Runs locally with Ollama (`hermes3:latest` for chat/tools, `nomic-embed-text` for embeddings, and `moondream` for vision) or seamlessly swaps to hosted OpenAI-compatible endpoints (OpenRouter, NVIDIA NIM, vLLM).
+- **High-Performance NVIDIA NIM Intelligence**  
+  Powered directly by NVIDIA NIM endpoints (`nvidia/nemotron-3.5-lightning-30b-a3b` for fast reasoning and tool calling, `nvidia/nemotron-3-embed-1b` for dense retrieval embeddings, and `meta/llama-3.2-11b-vision-instruct` for multimodal OCR). Zero local GPU memory strain.
 
--  **Hallucination-Proof Grounding & Citation Verification**  
+- **Hallucination-Proof Grounding & Citation Verification**  
   Every answer links back to exact files and page numbers (`[document.pdf:p.4]`). Claims, numbers, and physical units are deterministically validated in code against tool outputs — ungrounded citations and hallucinated figures are caught before reaching the user.
 
--  **Hybrid Search (Dense Vectors + BM25 via RRF)**  
+- **Hybrid Search (Dense Vectors + BM25 via RRF)**  
   Pure vector search fails silently on exact part numbers, SKU codes, and monetary figures (e.g., confusing `DWG-11483` with `DWG-11482`). Ada fuses dense embeddings (ChromaDB) with sparse keyword search (SQLite FTS5) using **Reciprocal Rank Fusion (RRF)**.
 
--  **Multi-Format Business Ingestion**  
+- **Multi-Format Business Ingestion**  
   Understands complex real-world files:
   - **PDFs**: Fast rendering and layout extraction via `pypdfium2` (permissive BSD-3 licensing).
   - **Spreadsheets (`.xlsx`, `.csv`, `.tsv`)**: Emits schema summaries and row-group chunks so queries hit specific rows rather than full-sheet data dumps.
   - **Presentations & Docs (`.pptx`, `.docx`)**: Extracts structured sections and bullet hierarchies.
   - **Images & Code**: Visual OCR cascade and multi-language syntax chunking.
 
--  **Resilient 2-Hop Agent Loop**  
-  Streams thoughts, tool calls, and tokens in real time over Server-Sent Events (SSE). Uses an 8-tool set designed for 8B models with a "reconnaissance first, deep read second" strategy. Tools never throw unhandled crashes — they return actionable guidance so the model self-corrects.
+- **Resilient 2-Hop Agent Loop**  
+  Streams thoughts, tool calls, and tokens in real time over Server-Sent Events (SSE). Uses an 8-tool set designed for high accuracy with a "reconnaissance first, deep read second" strategy. Tools return actionable guidance so the model self-corrects.
 
--  **Live Deliverable Generation**  
+- **Live Deliverable Generation**  
   Can directly produce real, openable files in your output directory:
-  -  **Excel Workbooks** (`.xlsx`) with typed columns and formatted numbers.
-  -  **Word Documents** (`.docx`) with structured headings and tables.
-  -  **PowerPoint Presentations** (`.pptx`) with slides and bullet points.
-  -  **Markdown Documents** (`.md`).
+  - **Excel Workbooks** (`.xlsx`) with typed columns and formatted numbers.
+  - **Word Documents** (`.docx`) with structured headings and tables.
+  - **PowerPoint Presentations** (`.pptx`) with slides and bullet points.
+  - **Markdown Documents** (`.md`).
 
--  **Universal Multi-Format File Organizer**  
-  Inspects messy directories, classifies loose files across **all formats** (PDFs, Office documents, spreadsheets, presentations, images, audio, video, archives, code, installers, and other formats), and presents non-destructive move suggestions for explicit review before applying.
+- **Universal Multi-Format File Organizer**  
+  Inspects messy directories, classifies loose files across **all formats** (PDFs, Office documents, spreadsheets, presentations, images, audio, video, archives, code, and other formats), and presents non-destructive move suggestions for explicit review before applying.
 
--  **Modern Frontend Options **  
-  Full-featured Django web application with real-time SSE chat streaming, direct **document & PDF file upload and deletion**, multi-format file organizer, and RAG evaluation dashboard — plus the React 19 + Electron desktop app.
+- **Modern Desktop Frontend (React 19 + TypeScript + Electron + Vite)**  
+  Full-featured desktop application with real-time SSE chat streaming, direct **document & PDF upload from the chat input or documents panel**, multi-format file organizer, and interactive RAG evaluation dashboard.
 
--  **Dynamic RAG Evaluation Benchmark **  
+- **Dynamic RAG Evaluation Benchmark (Zero Dummy Data)**  
   Evaluates the 4 core pillars of retrieval-augmented generation (Retrieval Accuracy, Answer Correctness, Faithfulness, and Latency) using **questions extracted dynamically from your actual uploaded PDFs**, ensuring benchmark results reflect your real production documents.
 
 ---
 
-##  Architecture Overview
+## Architecture Overview
 
 ```mermaid
 flowchart TD
-    User([User / Web Browser]) <--> Django[Django Web Frontend\nTemplates + Tailwind CSS + SSE]
-    User -.-> Electron[React 19 + Electron Desktop]
+    User([User / Desktop Application]) <--> Desktop[React 19 + TypeScript + Tailwind CSS\nVite + Electron Desktop / Web Browser]
     
-    Django <-->|HTTP / SSE Proxy\n127.0.0.1:8000| Server[FastAPI Core Server]
-    Electron -.->|HTTP / SSE Stream| Server
+    Desktop <-->|HTTP / SSE Stream\n127.0.0.1:8000| Server[FastAPI Core Server]
     
     subgraph Core Engine
         Server <--> Agent[Agent Loop\nHarness + Tools]
@@ -70,7 +68,7 @@ flowchart TD
         Server <--> EvalSuite[RAG Evaluation Suite\neval_rag.py]
         
         Agent <--> HybridRetriever[Hybrid Search Engine\nRRF Fusion]
-        HybridRetriever <--> Chroma[(ChromaDB\nDense Embeddings)]
+        HybridRetriever <--> Chroma[(ChromaDB\nDense 2048-dim Embeddings)]
         HybridRetriever <--> FTS5[(SQLite FTS5\nBM25 Sparse)]
         
         Agent <--> Deliver[Deliverable Writer\nxlsx / docx / pptx / md]
@@ -78,28 +76,39 @@ flowchart TD
     end
 
     subgraph LLM Providers
-        Agent <-->|OpenAI /v1 API| Ollama[Ollama Local Daemon\nhermes3 + nomic + moondream]
-        Agent -.->|Optional Swap| CloudLLM[OpenRouter / NIM / vLLM]
+        Agent <-->|OpenAI-Compatible /v1 API| NVIDIA[NVIDIA NIM Cloud API\nNemotron 30B + Vision 11B + Nemotron Embed 1B]
     end
 ```
 
 ---
 
-##  Quick Start
+## Quick Start
 
 ### 1. Prerequisites
 
-Make sure you have **Python 3.11+**, and **[Ollama](https://ollama.com)** installed. (Node.js is optional, only needed if using Electron).
+1. **Python 3.11+** installed.
+2. **Node.js 18+** & **npm** installed.
+3. An **NVIDIA API Key** (obtain free credits from [build.nvidia.com](https://build.nvidia.com)).
 
-Pull the default recommended local models:
-```bash
-ollama pull hermes3
-ollama pull nomic-embed-text
-ollama pull moondream
+### 2. Configure Environment (`.env`)
+
+Set your NVIDIA API key in `.env` (and `backend/.env`):
+```env
+NVIDIA_API_KEY=nvapi-your-key-here
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+
+CHAT_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b
+VISION_MODEL=meta/llama-3.2-11b-vision-instruct
+EMBED_MODEL=nvidia/nemotron-3-embed-1b
+
+REQUEST_TIMEOUT_SECONDS=120
+REQUEST_MAX_RETRIES=2
+EMBED_BATCH=64
 ```
 
-### 2. Start the Backend
+### 3. Start the Backend
 
+In your first terminal:
 ```bash
 # Navigate to backend directory
 cd backend
@@ -118,26 +127,9 @@ pip install -r requirements.txt
 uvicorn server:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-### 3. Start the Frontend
+### 4. Start the Frontend
 
-#### Option A: Django Web Frontend (Recommended Python Stack)
-
-In a new terminal:
-```bash
-# Navigate to Django frontend directory
-cd django_frontend
-
-# Run initial migrations
-python manage.py migrate
-
-# Launch Django development server
-python manage.py runserver 8080
-```
-Open **`http://127.0.0.1:8080`** in your browser to access the full Ada interface!
-
-#### Option B: React + Electron Desktop App
-
-In a new terminal:
+In your second terminal:
 ```bash
 # Navigate to frontend directory
 cd frontend
@@ -145,36 +137,17 @@ cd frontend
 # Install Node dependencies
 npm install
 
-# Run Vite + Electron in development mode
+# Option A: Run Vite + Electron desktop app (Recommended)
 npm run dev
+
+# Option B: Run Vite web browser dev server only
+npx vite
 ```
+Open the launched Electron application window, or navigate to **`http://localhost:5173`** in your web browser.
 
 ---
 
-##  Configuration (`.env`)
-
-Ada requires zero configuration to run locally with Ollama. If you want to customize models or use cloud providers, create a `.env` file in `backend/`:
-
-```env
-# --- Local Ollama Defaults ---
-OLLAMA_HOST=127.0.0.1:11434
-CHAT_MODEL=hermes3:latest
-EMBED_MODEL=nomic-embed-text
-VISION_MODEL=moondream
-
-# --- Optional: Hosted Providers (OpenRouter / NVIDIA NIM / vLLM) ---
-# CHAT_BASE_URL=https://openrouter.ai/api/v1
-# CHAT_API_KEY=your-openrouter-key
-# CHAT_MODEL=meta-llama/llama-3.1-70b-instruct
-
-# --- System Tuning ---
-CHAT_NUM_CTX=8192
-EMBED_BATCH=64
-```
-
----
-
-##  Supported File Formats
+## Supported File Formats
 
 | Format | Extensions | Ingestion Method |
 |---|---|---|
@@ -187,20 +160,7 @@ EMBED_BATCH=64
 
 ---
 
-##  Key Engineering Decisions
-
-1. **Explicit `127.0.0.1` Binding**  
-   On Windows, `localhost` attempts IPv6 (`::1`) first before timing out to IPv4. Ollama binds IPv4 only, causing a ~2.0-second SYN retry penalty on every single request. Pinning `127.0.0.1` dropped roundtrip latency from 2030ms to 0.8ms.
-2. **Context-Optimized Local VRAM (`num_ctx`)**  
-   Ollama reserves KV cache memory based on a model's theoretical max context (up to 262k), which pushes model layers onto the CPU on modest 6GB–8GB GPUs. Ada derives an optimized runtime model (`hermes3-ada`) capped at 8,192 tokens, increasing GPU residency from 29% to 71%.
-3. **Resumable SQLite Indexing Queue**  
-   Folder scanning queues work asynchronously in SQLite and reports progress in real time, preventing UI freezes even when ingesting thousands of enterprise files.
-4. **Completely Permissive Licensing**  
-   All dependencies use MIT, BSD, or Apache licenses (e.g., `pypdfium2` replaces `pymupdf` to eliminate AGPL copyleft restrictions).
-
----
-
-##  Testing & Verification
+## Testing & Verification
 
 Ada includes automated smoke tests, agent behavioural benchmarks, and a comprehensive RAG evaluation suite:
 
@@ -248,6 +208,6 @@ The evaluation suite can also be invoked or inspected via HTTP:
 
 ---
 
-##  License
+## License
 
-Distributed under the MIT License. See `LICENSE` for more information.
+Distributed under the MIT License. See [`LICENSE`](LICENSE) for more information.

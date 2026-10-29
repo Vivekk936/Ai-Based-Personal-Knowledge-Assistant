@@ -385,13 +385,10 @@ TOOL_SCHEMAS = [
             {"kind": {"type": "string", "enum": ["xlsx", "docx", "pptx", "md"]},
              "filename": {"type": "string", "description": "e.g. q3_summary.xlsx"},
              # A STRING, deliberately, even though the value is JSON. Declaring this as
-             # {"type": "object"} is the obvious-looking improvement and it breaks the
-             # default model completely: Ollama's Hermes tool-call parser drops any call
+             # {"type": "object"} is avoided because some tool-call parsers drop any call
              # whose arguments contain a nested object, returning an empty message with no
-             # content and no tool_calls while still reporting ~75 generated tokens.
-             # Measured on this box: hermes3 0/4 with an object, 4/4 with a string;
-             # qwen3.5:9b 4/4 either way. Do not "fix" this back without re-running that
-             # comparison. The parsing this costs us is handled in deliver.py, which
+             # content and no tool_calls.
+             # Do not change this back without validation. The parsing this costs us is handled in deliver.py, which
              # accepts every spec shape a model plausibly emits.
              "spec": {"type": "string",
                       "description": "the content. For docx/md/pptx just write plain Markdown "

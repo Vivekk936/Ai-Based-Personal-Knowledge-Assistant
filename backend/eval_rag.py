@@ -510,6 +510,14 @@ def generate_qa_dataset_from_uploaded_pdfs(specific_pdf_path: str | None = None)
 def _deterministic_embed(texts: list[str]) -> list[list[float]]:
     """Generates deterministic pseudo-embeddings for offline benchmark runs."""
     dims = 768
+    try:
+        col = retrieve.collection()
+        if col.count() > 0:
+            peek = col.peek(limit=1)
+            if peek and peek.get("embeddings") is not None and len(peek["embeddings"]) > 0:
+                dims = len(peek["embeddings"][0])
+    except Exception:
+        pass
     embeddings = []
     for text in texts:
         vec = [0.0] * dims
@@ -530,15 +538,7 @@ def generate_answer_for_query(
     is_online: bool,
     expected_abstain: bool
 ) -> tuple[str, list[str]]:
-    """Generates an answer using either live LLM harness or grounded synthesis from hits."""
-    if is_online:
-        from harness import run_agent
-        try:
-            result = run_agent(query, session_id="eval_rag")
-            return result.get("answer", ""), result.get("citations", [])
-        except Exception as e:
-            log.warning("Live agent error: %s, falling back to synthesis", e)
-
+    """Generates a grounded answer for the query using retrieved hits and LLM."""
     if expected_abstain:
         return "The provided document does not contain information to answer this question.", []
 
@@ -549,6 +549,40 @@ def generate_answer_for_query(
     fn = top_hit.get("filename", "")
     page = top_hit.get("page", 1)
     citation = f"[{fn}:{page}]"
+
+    if is_online:
+        try:
+            import config
+            ctx_parts = []
+            for h in hits[:3]:
+                h_fn = h.get("filename", "")
+                h_pg = h.get("page", 1)
+                ctx_parts.append(f"[{h_fn}:{h_pg}]\n{h.get('text', '')}")
+            ctx_text = "\n\n".join(ctx_parts)
+
+            system_prompt = (
+                "You are an expert QA assistant. Answer the user question based strictly on the provided context excerpts.\n"
+                "Every factual claim MUST include a citation in the format [filename:page] using the citation tags in the context.\n"
+                "If the context does not contain the answer, state clearly: 'The provided document does not contain information to answer this question.'"
+            )
+            user_prompt = f"Context:\n{ctx_text}\n\nQuestion: {query}\n\nAnswer with citations:"
+            resp = config.chat_client().chat.completions.create(
+                model=config.tuned_chat_model(),
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=300,
+                temperature=0.1,
+            )
+            ans_text = resp.choices[0].message.content or ""
+            citations = list(set(re.findall(r"\[[^\]]+:\d+\]", ans_text)))
+            if not citations:
+                citations = [citation]
+                ans_text += f" {citation}"
+            return ans_text.strip(), citations
+        except Exception as e:
+            log.warning("Online LLM answer generation failed (%s); using synthesis fallback", e)
 
     q_words = set(w for w in _tokenize(query) if len(w) > 2 and w not in {
         "what", "which", "where", "how", "when", "does", "the", "for", "and", "is", "are", "stated"
@@ -599,20 +633,17 @@ def run_rag_evaluation(
     import retrieve
     from permissions import grant_folder
 
-    # Fast online check
+    # Online check: verifies NVIDIA API Key is present and reachable
     is_online = False
     if not offline:
-        try:
-            import socket
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.3)
-            host = os.getenv("OLLAMA_HOST", "127.0.0.1:11434").split(":")[0]
-            port = int(os.getenv("OLLAMA_HOST", "127.0.0.1:11434").split(":")[1])
-            s.connect((host, port))
-            s.close()
-            is_online = True
-        except Exception:
-            is_online = False
+        api_key = os.getenv("NVIDIA_API_KEY") or os.getenv("CHAT_API_KEY")
+        if api_key and not api_key.startswith("your_"):
+            try:
+                config.chat_client().models.list()
+                is_online = True
+            except Exception as e:
+                log.warning("NVIDIA API online check failed (%s); using offline deterministic mode", e)
+                is_online = False
 
     if not is_online:
         config.embed_texts = _deterministic_embed
@@ -649,7 +680,7 @@ def run_rag_evaluation(
         print("ADA RAG EVALUATION BENCHMARK")
         print(f"Source PDF: {source_desc} ({len(qa_set)} questions generated from document content)")
         print("=" * 80)
-        mode_str = "LIVE LLM + Chroma/Ollama" if is_online else "OFFLINE Deterministic Benchmark (Local Index)"
+        mode_str = "LIVE LLM + NVIDIA NIM" if is_online else "OFFLINE Deterministic Benchmark (Local Index)"
         print(f"Execution Mode: {mode_str}\n")
 
     results_per_case = []

@@ -46,7 +46,7 @@ WALL_CLOCK_SECONDS = 300
 # what it produced, strip the offending parts, and be honest about it.
 MAX_REPAIRS = 2
 # An empty reply gets its own, larger budget because it is not a reasoning failure: the
-# model generated tokens (Ollama reports the count) and the tool-call parser threw them
+# model generated tokens and the tool-call parser threw them
 # away, which happens most often when the arguments carry a long multi-line string like
 # the body of a letter. Charging that to the semantic repair budget spends the model's
 # real second chances on a formatting quirk.
@@ -255,10 +255,26 @@ def _stream_completion(client, model: str, messages: list[dict]):
     content: list[str] = []
     calls: dict[int, dict] = {}
     streamed = False
-
-    stream = client.chat.completions.create(
-        model=model, messages=messages, tools=TOOL_SCHEMAS, temperature=0.1, stream=True
-    )
+    try:
+        stream = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            tools=TOOL_SCHEMAS,
+            temperature=0.1,
+            stream=True,
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        )
+    except Exception as e:
+        if any(keyword in str(e).lower() for keyword in ["extra_body", "chat_template", "unknown parameter", "400"]):
+            stream = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=TOOL_SCHEMAS,
+                temperature=0.1,
+                stream=True,
+            )
+        else:
+            raise
     for chunk in stream:
         if not chunk.choices:
             continue
@@ -289,7 +305,7 @@ def _stream_completion(client, model: str, messages: list[dict]):
 def _tool_call_from_text(content: str) -> dict | None:
     """Recover a tool call the server handed back as prose.
 
-    Ollama's Hermes parser does not always recognise the model's tool-call block, and
+    The model's tool-call parser does not always recognise the model's tool-call block, and
     when it fails the whole thing arrives as `content` — a bare JSON object like
     {"arguments": {...}, "name": "write_deliverable"} — with `tool_calls` empty. The
     model did its job; the plumbing dropped it. Left alone the user sees raw JSON where
@@ -616,7 +632,7 @@ def run_agent(user_message: str, history: list[dict] | None = None, session_id: 
 
 
 def warmup() -> None:
-    keep_warm(tuned_chat_model())
+    pass
 
 
 def demo() -> None:

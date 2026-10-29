@@ -52,14 +52,35 @@ def index_chunks(rows: list[dict]) -> int:
         [embed_input(r["filename"], r["section"], r["page"], r["text"]) for r in rows]
     )
     col = collection()
-    col.upsert(
-        ids=[r["id"] for r in rows],
-        embeddings=vectors,
-        metadatas=[
-            {"doc_id": r["doc_id"], "filename": r["filename"], "page": r["page"], "path": r["path"]}
-            for r in rows
-        ],
-    )
+    try:
+        col.upsert(
+            ids=[r["id"] for r in rows],
+            embeddings=vectors,
+            metadatas=[
+                {"doc_id": r["doc_id"], "filename": r["filename"], "page": r["page"], "path": r["path"]}
+                for r in rows
+            ],
+        )
+    except Exception as e:
+        if "dimension" in str(e).lower():
+            log.warning("Embedding dimension mismatch (%s); recreating Chroma collection", e)
+            global _collection
+            if _client:
+                try:
+                    _client.delete_collection("chunks")
+                except Exception:
+                    pass
+                _collection = _client.get_or_create_collection("chunks")
+                _collection.upsert(
+                    ids=[r["id"] for r in rows],
+                    embeddings=vectors,
+                    metadatas=[
+                        {"doc_id": r["doc_id"], "filename": r["filename"], "page": r["page"], "path": r["path"]}
+                        for r in rows
+                    ],
+                )
+        else:
+            raise
     return len(rows)
 
 
@@ -73,7 +94,7 @@ def drop_document(path: str) -> None:
 
 def search_dense(query: str, k: int = 30) -> list[tuple[str, float]]:
     try:
-        [vec] = embed_texts([query])
+        [vec] = embed_texts([query], input_type="query")
     except Exception as e:
         log.warning("query embedding failed: %s", e)
         return []

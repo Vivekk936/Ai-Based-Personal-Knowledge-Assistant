@@ -388,8 +388,7 @@ def eval_rag_route(offline: bool = False, force_refresh: bool = False, pdf: str 
         try:
             with open(DEFAULT_RESULTS, "r", encoding="utf-8") as f:
                 cached = json.load(f)
-                src = cached.get("benchmark_summary", {}).get("source_pdf")
-                if src and os.path.exists(src):
+                if cached and cached.get("status") in ("success", "no_uploaded_pdfs"):
                     return cached
         except Exception:
             pass

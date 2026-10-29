@@ -1,0 +1,48 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-accent: #e08a5b;
+  --color-accent-strong: #cf7443;
+  --color-accent-soft: #e08a5b26;
+  --font-sans: 'Plus Jakarta Sans', system-ui, 'Segoe UI', Roboto, sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  scroll-behavior: smooth;
+}
+
+::selection {
+  background: var(--color-accent-soft);
+  color: #fff;
+}
+
+/* A slimmer, quieter scrollbar than the browser default — the chat pane scrolls often. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent;
+}
+
+@keyframes typing-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+.typing-dot {
+  animation: typing-bounce 1.1s ease-in-out infinite;
+}

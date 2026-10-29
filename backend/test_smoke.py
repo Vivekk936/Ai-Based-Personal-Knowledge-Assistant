@@ -85,7 +85,7 @@ def test_deterministic() -> None:
 
 def test_pipeline() -> None:
     if not embedding_server_up():
-        print("SKIP pipeline — embedding server unreachable (start Ollama to run this)")
+        print("SKIP pipeline — embedding server unreachable (check NVIDIA_API_KEY in .env to run this)")
         return
 
     tmp = tempfile.mkdtemp(prefix="ada_smoke_")
