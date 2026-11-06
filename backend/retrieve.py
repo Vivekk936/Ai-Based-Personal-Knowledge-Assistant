@@ -39,20 +39,28 @@ def collection():
     return _collection
 
 
-def index_chunks(rows: list[dict]) -> int:
+def index_chunks(rows: list[dict], clear_first: bool = True) -> int:
     """Writes chunks to both halves of the index. SQLite first: it owns the text, and a
     vector with no text behind it is unciteable, whereas text with no vector is still
     reachable by BM25. Ordering the failure that way keeps a crash recoverable."""
     if not rows:
         return 0
     path = rows[0]["path"]
-    store.replace_chunks(path, rows)
+    if clear_first:
+        store.replace_chunks(path, rows)
+    else:
+        store.append_chunks(path, rows, clear_first=False)
 
     vectors = embed_texts(
         [embed_input(r["filename"], r["section"], r["page"], r["text"]) for r in rows]
     )
     col = collection()
     try:
+        if clear_first:
+            try:
+                col.delete(where={"path": path})
+            except Exception:
+                pass
         col.upsert(
             ids=[r["id"] for r in rows],
             embeddings=vectors,
@@ -92,7 +100,7 @@ def drop_document(path: str) -> None:
     store.replace_chunks(path, [])
 
 
-def search_dense(query: str, k: int = 30) -> list[tuple[str, float]]:
+def search_dense(query: str, k: int = 30, filename: str | None = None) -> list[tuple[str, float]]:
     try:
         [vec] = embed_texts([query], input_type="query")
     except Exception as e:
@@ -101,18 +109,23 @@ def search_dense(query: str, k: int = 30) -> list[tuple[str, float]]:
     col = collection()
     if col.count() == 0:
         return []
-    res = col.query(query_embeddings=[vec], n_results=min(k, col.count()))
+    where = {"filename": filename} if filename else None
+    try:
+        res = col.query(query_embeddings=[vec], n_results=min(k, col.count()), where=where)
+    except Exception as e:
+        log.warning("dense query failed with where=%s: %s", where, e)
+        res = col.query(query_embeddings=[vec], n_results=min(k, col.count()))
     ids = (res.get("ids") or [[]])[0]
     dists = (res.get("distances") or [[]])[0]
     return list(zip(ids, dists))
 
 
-def search(query: str, k: int = 6, candidates: int = 30) -> list[dict]:
+def search(query: str, k: int = 6, candidates: int = 30, filename: str | None = None) -> list[dict]:
     """Returns fused hits, best first. Each carries `rrf` (fusion score) and the ranks it
     came from, because `dense_rank is None` is a useful signal on its own — it means the
     only reason this hit surfaced is a literal string match."""
-    dense = search_dense(query, candidates)
-    lexical = store.search_lexical(query, candidates)
+    dense = search_dense(query, candidates, filename=filename)
+    lexical = store.search_lexical(query, candidates, filename=filename)
     if not dense and not lexical:
         return []
 

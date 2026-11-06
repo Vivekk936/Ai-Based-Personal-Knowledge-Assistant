@@ -57,10 +57,11 @@ def _denied(path: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def search_documents(query: str, k: int = 6) -> str:
+def search_documents(query: str, k: int = 6, filename: str = "") -> str:
     """Hop one: cheap reconnaissance over the index."""
-    k = max(1, min(int(k or 6), 10))
-    hits = search(query, k=k)
+    k = max(1, min(int(k or 6), 15))
+    fn = filename.strip() or None
+    hits = search(query, k=k, filename=fn)
     if not hits:
         stats = store.queue_stats()
         if stats["indexed"] == 0:
@@ -69,33 +70,76 @@ def search_documents(query: str, k: int = 6) -> str:
                 f"{stats['pending']} files are still queued. "
                 "Tell the user indexing is still in progress rather than guessing an answer."
             )
+        target_doc = f" in {fn}" if fn else ""
         return (
-            f"No matches for {query!r} across {stats['indexed']} indexed files.\n"
-            "Try different wording, or call list_folder to see what exists. "
+            f"No matches for {query!r}{target_doc} across {stats['indexed']} indexed files.\n"
+            "Try different wording, alternative keywords, or call list_folder to see what exists. "
             "If the corpus genuinely does not cover this, say so — do not guess."
         )
 
     conf = confidence(hits)
-    lines = [f"Retrieval confidence: {conf}. {len(hits)} results (snippets — call read_chunk for full text):"]
+    lines = [f"Retrieval confidence: {conf}. {len(hits)} results (snippets — call read_chunk or read_chunks for full text):"]
     for h in hits:
         snippet = " ".join(h["text"].split())[:MAX_SNIPPET]
         both = "both" if h["agreed"] else ("keyword" if h["dense_rank"] is None else "semantic")
         lines.append(f"- id={h['id']} [{h['filename']}:{h['page']}] ({both}) {snippet}…")
     if conf in ("low", "none"):
         lines.append(
-            "Confidence is low: nothing matched strongly. Prefer telling the user you "
-            "don't have enough information over answering from these."
+            "Confidence is low: nothing matched strongly. Try another search with alternative keywords before concluding."
         )
     return "\n".join(lines)
 
 
+def read_chunks(chunk_ids: list[str] | str) -> str:
+    """Read the full text of multiple search results at once. Useful for inspecting
+    multiple relevant sections in a single step."""
+    if isinstance(chunk_ids, str):
+        ids = [c.strip() for c in re.split(r"[,;\s]+", chunk_ids) if c.strip()]
+    elif isinstance(chunk_ids, list):
+        ids = [str(c).strip() for c in chunk_ids if str(c).strip()]
+    else:
+        return "chunk_ids must be a list of chunk IDs or a comma-separated string."
+
+    if not ids:
+        return "No chunk IDs provided."
+
+    ids = ids[:8]
+    records = store.get_chunks(ids)
+    if not records:
+        return f"None of the requested chunk IDs ({', '.join(ids)}) were found in the index."
+
+    out = []
+    for cid in ids:
+        rec = records.get(cid)
+        if not rec:
+            out.append(f"[{cid}]: Not found in index.")
+            continue
+        text = rec["text"]
+        note = ""
+        if len(text) > MAX_CHUNK_CHARS:
+            note = f"\n…[truncated; passage is {len(text)} chars]"
+            text = text[:MAX_CHUNK_CHARS]
+        head = f"[{rec['filename']}:{rec['page']}]"
+        if rec["section"]:
+            head += f" ({rec['section']})"
+        out.append(f"{head}\n<document_text>\n{text}{note}\n</document_text>")
+
+    return "\n\n".join(out)
+
+
 def read_chunk(chunk_id: str) -> str:
     """Hop two: the full passage behind one search result."""
+    if not chunk_id:
+        return "chunk_id is required."
+    cids = [c.strip() for c in re.split(r"[,;\s]+", str(chunk_id)) if c.strip()]
+    if len(cids) > 1:
+        return read_chunks(cids)
+
     rec = store.get_chunks([chunk_id]).get(chunk_id)
     if not rec:
         return (
             f"No chunk with id {chunk_id!r}. Ids come from search_documents results and "
-            "look like 'a1b2c3d4_p3_c0'. Call search_documents first."
+            "look like 'a1b2c3d4_c0'. Call search_documents first."
         )
     text = rec["text"]
     note = ""
@@ -325,6 +369,7 @@ _SPEC_EXAMPLES = {
 TOOL_FUNCTIONS = {
     "search_documents": search_documents,
     "read_chunk": read_chunk,
+    "read_chunks": read_chunks,
     "list_folder": list_folder,
     "read_file": read_file,
     "grep_files": grep_files,
@@ -332,7 +377,7 @@ TOOL_FUNCTIONS = {
     "write_deliverable": write_deliverable,
 }
 
-READ_ONLY = {"search_documents", "read_chunk", "list_folder", "read_file", "grep_files"}
+READ_ONLY = {"search_documents", "read_chunk", "read_chunks", "list_folder", "read_file", "grep_files"}
 
 
 def _schema(name: str, desc: str, props: dict, required: list[str]) -> dict:
@@ -345,17 +390,22 @@ def _schema(name: str, desc: str, props: dict, required: list[str]) -> dict:
 
 TOOL_SCHEMAS = [
     _schema("search_documents",
-            "Search indexed company documents. Returns SNIPPETS only — call read_chunk for the "
-            "full passage of any result you want to quote or cite. Do NOT use this to list files; "
-            "use list_folder.",
+            "Search indexed company documents. Returns SNIPPETS — call read_chunk or read_chunks for the "
+            "full passage of results you want to quote or cite. Can optionally filter to a specific filename.",
             {"query": {"type": "string", "description": "what to look for, in plain words"},
-             "k": {"type": "integer", "description": "how many results, 1-10", "default": 6}},
+             "k": {"type": "integer", "description": "how many results, 1-15", "default": 6},
+             "filename": {"type": "string", "description": "optional filename to restrict search to a specific document or attachment"}},
             ["query"]),
     _schema("read_chunk",
-            "Get the full text of one search result, by the id shown in search_documents output. "
+            "Get the full text of one search result (or comma-separated ids), by the id shown in search_documents output. "
             "This is what you quote and cite from.",
-            {"chunk_id": {"type": "string", "description": "an id from search_documents, e.g. a1b2_p3_c0"}},
+            {"chunk_id": {"type": "string", "description": "an id from search_documents, e.g. a1b2_c0"}},
             ["chunk_id"]),
+    _schema("read_chunks",
+            "Get the full text of multiple search results in a single step. Highly recommended for inspecting "
+            "multiple passages across documents or distant pages.",
+            {"chunk_ids": {"type": "array", "items": {"type": "string"}, "description": "list of chunk IDs from search_documents"}},
+            ["chunk_ids"]),
     _schema("list_folder",
             "List files and subfolders. Call with no path to see which root folders you may access.",
             {"path": {"type": "string", "description": "folder path; omit to list granted roots"},

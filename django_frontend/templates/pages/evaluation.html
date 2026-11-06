@@ -1,0 +1,194 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}RAG Benchmark — Ada Intelligence{% endblock %}
+
+{% block content %}
+<div class="panel-page">
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <div class="page-kicker">Quality Control Benchmark</div>
+      <h1 class="page-title">RAG Evaluation Benchmark</h1>
+      <p class="page-desc">Empirical measurement of retrieval accuracy, answer faithfulness, and response latency on real uploaded PDFs.</p>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button type="button" id="btn-execute-eval" class="btn-primary">Execute Benchmark</button>
+      <button type="button" id="btn-reload-eval" class="btn-secondary">Reload Results</button>
+      <label class="btn-secondary" style="cursor: pointer;">
+        + Benchmark PDF
+        <input type="file" id="eval-pdf-input" accept=".pdf" style="display: none;">
+      </label>
+    </div>
+  </div>
+
+  <div id="eval-status-banner" style="display: none; padding: 10px 14px; border-radius: 8px; background: var(--bg-panel-raised); border: 1px solid var(--border-color); font-size: 12.5px; margin-bottom: 16px;"></div>
+
+  <!-- Benchmark Metadata Banner -->
+  <div class="pro-card" style="padding: 12px 18px; margin-bottom: 20px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; font-size: 12.5px;">
+    <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+      <div>
+        <span style="color: var(--text-subtle);">Document Under Test:</span>
+        <strong style="color: var(--text-bright); margin-left: 4px;">{{ eval_report.benchmark_summary.source_pdf|default:"None" }}</strong>
+      </div>
+      <div>
+        <span style="color: var(--text-subtle);">Execution Mode:</span>
+        <strong style="color: var(--color-accent); margin-left: 4px;">{{ eval_report.benchmark_summary.mode|default:"ONLINE"|upper }}</strong>
+      </div>
+      <div>
+        <span style="color: var(--text-subtle);">Timestamp:</span>
+        <span style="color: var(--text-muted); margin-left: 4px;">{{ eval_report.benchmark_summary.timestamp|default:"Recent" }}</span>
+      </div>
+    </div>
+    <span class="status-badge" style="background: rgba(224, 138, 91, 0.12); color: var(--color-accent); border: 1px solid rgba(224, 138, 91, 0.3);">
+      ZERO DUMMY DATA
+    </span>
+  </div>
+
+  <!-- 4 Core Pillars KPI Cards -->
+  <div class="kpi-grid">
+    <!-- 1. Retrieval Accuracy -->
+    <div class="kpi-card">
+      <div class="kpi-title">1. Retrieval Accuracy</div>
+      <div class="kpi-value">
+        {% widthratio eval_report.retrieval_accuracy.hit_rate_at_3 1 100 %}%
+      </div>
+      <div class="kpi-delta">
+        MRR: {{ eval_report.retrieval_accuracy.mean_mrr|floatformat:2|default:"0.00" }} · Hit@1: {% widthratio eval_report.retrieval_accuracy.hit_rate_at_1 1 100 %}%
+      </div>
+    </div>
+
+    <!-- 2. Answer Correctness -->
+    <div class="kpi-card">
+      <div class="kpi-title">2. Answer Correctness</div>
+      <div class="kpi-value">
+        {% widthratio eval_report.correctness.overall_correctness 1 100 %}%
+      </div>
+      <div class="kpi-delta">
+        Fact Recall: {% widthratio eval_report.correctness.mean_fact_recall 1 100 %}% · F1: {% widthratio eval_report.correctness.mean_token_f1 1 100 %}%
+      </div>
+    </div>
+
+    <!-- 3. Grounded Faithfulness -->
+    <div class="kpi-card">
+      <div class="kpi-title">3. Grounded Faithfulness</div>
+      <div class="kpi-value">
+        {% widthratio eval_report.faithfulness.mean_faithfulness 1 100 %}%
+      </div>
+      <div class="kpi-delta">
+        Hallucination: {% widthratio eval_report.faithfulness.mean_hallucination_rate 1 100 %}% · Bad Nums: {{ eval_report.faithfulness.total_unsupported_numbers|default:"0" }}
+      </div>
+    </div>
+
+    <!-- 4. Response Latency -->
+    <div class="kpi-card">
+      <div class="kpi-title">4. Response Latency</div>
+      <div class="kpi-value">
+        {{ eval_report.response_time_ms.total.mean_ms|floatformat:1|default:"0.0" }} ms
+      </div>
+      <div class="kpi-delta">
+        P50: {{ eval_report.response_time_ms.total.median_ms|floatformat:1|default:"0.0" }}ms · Ret: {{ eval_report.response_time_ms.retrieval.mean_ms|floatformat:1|default:"0.0" }}ms
+      </div>
+    </div>
+  </div>
+
+  <!-- Dynamic Benchmark Cases Table -->
+  <div class="pro-card">
+    <div style="font-size: 13px; font-weight: 700; color: var(--text-bright); margin-bottom: 4px;">
+      Dynamic PDF Benchmark Cases ({{ eval_report.individual_cases|length|default:"0" }})
+    </div>
+    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+      Click any test case to inspect ground truth, citations, generated answer, and latency breakdown.
+    </p>
+
+    <div class="data-table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Category</th>
+            <th>Question Extracted from PDF</th>
+            <th>Retrieval</th>
+            <th>MRR</th>
+            <th>Correctness</th>
+            <th>Faithfulness</th>
+            <th>Latency</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in eval_report.individual_cases %}
+            <tr style="cursor: pointer;" onclick="selectTestCase('{{ c|escapejs }}')">
+              <td style="font-family: var(--font-mono); color: var(--text-muted);">{{ c.id }}</td>
+              <td style="font-weight: 600; text-transform: uppercase;">{{ c.category }}</td>
+              <td style="color: var(--text-bright); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                {{ c.query }}
+              </td>
+              <td>
+                {% if c.retrieval.is_out_of_corpus %}
+                  <span class="status-badge na">N/A</span>
+                {% elif c.retrieval.hit_at_3 > 0.5 %}
+                  <span class="status-badge hit">HIT</span>
+                {% else %}
+                  <span class="status-badge miss">MISS</span>
+                {% endif %}
+              </td>
+              <td style="font-family: var(--font-mono);">
+                {% if c.retrieval.is_out_of_corpus %}--{% else %}{{ c.retrieval.mrr|floatformat:2 }}{% endif %}
+              </td>
+              <td>{% widthratio c.correctness.correctness 1 100 %}%</td>
+              <td>{% widthratio c.faithfulness.faithfulness 1 100 %}%</td>
+              <td style="font-family: var(--font-mono); color: var(--text-muted);">{{ c.timing_ms.total|floatformat:1 }} ms</td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="8" style="text-align: center; color: var(--text-subtle); padding: 30px;">
+                No test cases available. Click "+ Benchmark PDF" above to evaluate questions dynamically from a PDF document.
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Deep-Dive Case Inspector (Revealed on click) -->
+  <div id="deep-dive-inspector" class="pro-card" style="display: none;">
+    <div style="font-size: 13px; font-weight: 700; color: var(--text-bright); margin-bottom: 2px;">
+      Deep-Dive Inspection: Query <span id="inspect-qid" style="color: var(--color-accent); font-family: var(--font-mono);"></span>
+    </div>
+    <p style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 12px;">Detailed comparison of expected ground truth vs. actual model retrieval and citations.</p>
+
+    <div class="case-inspector-grid">
+      <div class="inspector-box">
+        <div style="margin-bottom: 8px;">
+          <strong style="color: var(--text-subtle); text-transform: uppercase; font-size: 11px;">Query:</strong>
+          <div id="inspect-query" style="color: var(--text-bright); margin-top: 2px;"></div>
+        </div>
+        <div>
+          <strong style="color: var(--text-subtle); text-transform: uppercase; font-size: 11px;">Expected Ground Truth:</strong>
+          <div id="inspect-ref" style="color: var(--text-muted); margin-top: 2px;"></div>
+        </div>
+      </div>
+
+      <div class="inspector-box">
+        <div style="margin-bottom: 8px;">
+          <strong style="color: var(--text-subtle); text-transform: uppercase; font-size: 11px;">Generated Answer:</strong>
+          <div id="inspect-gen" style="color: var(--text-bright); margin-top: 2px;"></div>
+        </div>
+        <div style="margin-bottom: 8px;">
+          <strong style="color: var(--text-subtle); text-transform: uppercase; font-size: 11px;">Citations:</strong>
+          <div id="inspect-citations" style="color: var(--color-accent); font-family: var(--font-mono); margin-top: 2px;"></div>
+        </div>
+        <div>
+          <strong style="color: var(--text-subtle); text-transform: uppercase; font-size: 11px;">Latency Profile:</strong>
+          <div id="inspect-timing" style="color: var(--text-muted); font-family: var(--font-mono); font-size: 11.5px; margin-top: 2px;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'js/evaluation.js' %}"></script>
+{% endblock %}

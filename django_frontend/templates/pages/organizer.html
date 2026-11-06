@@ -1,0 +1,136 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Smart File Organizer — Ada Intelligence{% endblock %}
+
+{% block content %}
+<div class="panel-page">
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <div class="page-kicker">File System Intelligence</div>
+      <h1 class="page-title">Universal File Organizer</h1>
+      <p class="page-desc">Classify, structure, and organize loose files across all enterprise formats.</p>
+    </div>
+    <span class="status-badge" style="background: rgba(224, 138, 91, 0.12); color: var(--color-accent); border: 1px solid rgba(224, 138, 91, 0.3);">
+      NON-DESTRUCTIVE
+    </span>
+  </div>
+
+  <div id="organizer-status-message" style="display: none; padding: 10px 14px; border-radius: 8px; background: var(--bg-panel-raised); border: 1px solid var(--border-color); font-size: 12.5px; margin-bottom: 16px;"></div>
+
+  <!-- Scan & Analyze Card -->
+  <div class="pro-card">
+    <div style="font-size: 13px; font-weight: 700; color: var(--text-bright); margin-bottom: 8px;">
+      Directory Analysis & Taxonomy Reorganization
+    </div>
+    <p style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 14px;">
+      Specify a directory to analyze loose documents, classify them by business taxonomy, and review relocation proposals.
+    </p>
+
+    <div class="form-group">
+      <label class="form-label" for="target-folder-input">Target Directory Path</label>
+      <div style="display: flex; gap: 8px;">
+        <input type="text" id="target-folder-input" class="form-input" style="flex: 1;" placeholder="e.g. C:\Users\Documents\Work" value="{% if granted_folders %}{{ granted_folders.0 }}{% endif %}">
+        <button type="button" id="btn-browse-folder" class="btn-secondary">Browse...</button>
+        <button type="button" id="btn-analyze" class="btn-primary">Analyze Directory</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Move Proposals Section (Hidden until analyzed) -->
+  <div id="proposals-section" class="pro-card" style="display: none;">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
+      <div>
+        <div style="font-size: 13px; font-weight: 700; color: var(--text-bright);">Review Relocation Proposals</div>
+        <p style="font-size: 12px; color: var(--text-muted);">Select proposals to approve before executing moves.</p>
+      </div>
+      <button type="button" id="btn-apply-moves" class="btn-primary">Apply Approved Moves</button>
+    </div>
+
+    <div class="data-table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="width: 36px; text-align: center;">Approve</th>
+            <th>File</th>
+            <th>Proposed Destination</th>
+            <th>Classification Reason</th>
+          </tr>
+        </thead>
+        <tbody id="proposals-table-body">
+          <!-- Proposals injected dynamically -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Document Ingestion & Inventory Card -->
+  <div class="pro-card">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+      <div>
+        <div style="font-size: 13px; font-weight: 700; color: var(--text-bright);">Active Document Inventory</div>
+        <p style="font-size: 12px; color: var(--text-muted);">Indexed files available for grounded RAG synthesis and search.</p>
+      </div>
+      <label class="btn-secondary" style="cursor: pointer;">
+        + Upload Files
+        <input type="file" id="organizer-upload-input" multiple style="display: none;" accept=".pdf,.xlsx,.csv,.docx,.pptx,.txt,.md,.py,.json">
+      </label>
+    </div>
+
+    <div class="data-table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Format</th>
+            <th>Filename</th>
+            <th>Status</th>
+            <th>Pages</th>
+            <th>Chunks</th>
+            <th style="text-align: right;">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in uploads %}
+            <tr>
+              <td style="width: 60px;">
+                <span class="doc-badge {{ u.ext }}">{{ u.ext|upper }}</span>
+              </td>
+              <td style="font-weight: 600; color: var(--text-bright);">{{ u.filename }}</td>
+              <td>
+                {% if u.state == 'indexed' %}
+                  <span class="status-badge" style="background: rgba(16, 185, 129, 0.12); color: #86efac; border: 1px solid rgba(16, 185, 129, 0.3);">INDEXED</span>
+                {% elif u.state == 'error' %}
+                  <span class="status-badge" style="background: rgba(239, 68, 68, 0.12); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3);">ERROR</span>
+                {% else %}
+                  <span class="status-badge" style="background: rgba(245, 158, 11, 0.12); color: #fde047; border: 1px solid rgba(245, 158, 11, 0.3);">{{ u.state|upper }}</span>
+                {% endif %}
+              </td>
+              <td>{{ u.pages|default:"-" }}</td>
+              <td>{{ u.chunks|default:"-" }}</td>
+              <td style="text-align: right;">
+                <button type="button" class="btn-icon-sm" style="display: inline-flex;" title="Delete file from index" onclick="window.deleteUploadedDoc('{{ u.filename|escapejs }}')">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  </svg>
+                </button>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="6" style="text-align: center; color: var(--text-subtle); padding: 24px;">
+                No documents uploaded yet. Click "+ Upload Files" to index documents into the system.
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'js/organizer.js' %}"></script>
+{% endblock %}

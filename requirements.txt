@@ -2,9 +2,10 @@
 # Ada: Dependencies
 # ==============================================================================
 
-# Core Framework & Backend Server
+# Core Framework, Backend Server & Django Frontend
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
+django>=5.0
 python-multipart>=0.0.9
 pydantic>=2.7.0
 python-dotenv>=1.0.0

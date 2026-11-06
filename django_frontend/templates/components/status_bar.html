@@ -1,0 +1,13 @@
+<!-- Bottom Status Bar -->
+<footer class="status-bar">
+  <div class="status-info-left">
+    <span id="status-dot" class="status-dot {% if health.status == 'ok' %}online{% else %}degraded{% endif %}"></span>
+    <span id="status-label">{% if health.status == 'ok' %}Connected{% else %}Connecting...{% endif %}</span>
+    <span id="status-model" style="color: var(--text-muted); font-size: 11px;">
+      {% if health.chat_model %}· {{ health.chat_model }}{% endif %}
+    </span>
+  </div>
+  <div class="status-info-right" style="font-size: 11px; color: var(--text-subtle);">
+    FastAPI Core: <span style="color: var(--text-muted); font-family: var(--font-mono);">{{ FASTAPI_BASE_URL }}</span>
+  </div>
+</footer>

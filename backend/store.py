@@ -281,6 +281,23 @@ def queue_stats(root: str | None = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _normalize_chunk_rows(path: str, rows: list[dict]) -> list[dict]:
+    normalized = []
+    base_name = os.path.basename(path)
+    for r in rows:
+        normalized.append({
+            "id": r["id"],
+            "doc_id": r.get("doc_id") or ("doc_" + r["id"]),
+            "path": r.get("path") or path,
+            "filename": r.get("filename") or base_name,
+            "page": int(r.get("page", 1)),
+            "section": r.get("section") or "",
+            "kind": r.get("kind") or "text",
+            "text": r.get("text", ""),
+        })
+    return normalized
+
+
 def replace_chunks(path: str, rows: list[dict]) -> None:
     """Delete-then-insert in one transaction, so a re-index of a changed file can never
     leave the old and new chunks both live."""
@@ -296,8 +313,27 @@ def replace_chunks(path: str, rows: list[dict]) -> None:
             conn.executemany(
                 "INSERT OR REPLACE INTO chunks (id, doc_id, path, filename, page, section, kind, text) "
                 "VALUES (:id,:doc_id,:path,:filename,:page,:section,:kind,:text)",
-                rows,
+                _normalize_chunk_rows(path, rows),
             )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def append_chunks(path: str, rows: list[dict], clear_first: bool = False) -> None:
+    """Inserts chunks into SQLite. If clear_first=True, drops existing chunks for path first."""
+    if clear_first:
+        replace_chunks(path, rows)
+        return
+    if not rows:
+        return
+    conn = connect()
+    try:
+        conn.executemany(
+            "INSERT OR REPLACE INTO chunks (id, doc_id, path, filename, page, section, kind, text) "
+            "VALUES (:id,:doc_id,:path,:filename,:page,:section,:kind,:text)",
+            _normalize_chunk_rows(path, rows),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -325,7 +361,7 @@ def _fts_query(text: str) -> str:
     return " OR ".join(f'"{t}"' for t in tokens[:32])
 
 
-def search_lexical(query: str, k: int = 30) -> list[tuple[str, float]]:
+def search_lexical(query: str, k: int = 30, filename: str | None = None) -> list[tuple[str, float]]:
     """BM25 over chunk text. This is the half of retrieval that finds 'DWG-11482' and
     'ASTM A193 B7' — an embedding model is trained to generalise across surface form, so
     exact part numbers and codes are precisely what it throws away."""
@@ -334,12 +370,20 @@ def search_lexical(query: str, k: int = 30) -> list[tuple[str, float]]:
         return []
     conn = connect()
     try:
-        rows = conn.execute(
-            "SELECT c.id, bm25(chunks_fts, 1.0, 2.0, 1.5) AS score FROM chunks_fts "
-            "JOIN chunks c ON c.rowid = chunks_fts.rowid "
-            "WHERE chunks_fts MATCH ? ORDER BY score LIMIT ?",
-            (q, k),
-        ).fetchall()
+        if filename:
+            rows = conn.execute(
+                "SELECT c.id, bm25(chunks_fts, 1.0, 2.0, 1.5) AS score FROM chunks_fts "
+                "JOIN chunks c ON c.rowid = chunks_fts.rowid "
+                "WHERE chunks_fts MATCH ? AND c.filename = ? ORDER BY score LIMIT ?",
+                (q, filename, k),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT c.id, bm25(chunks_fts, 1.0, 2.0, 1.5) AS score FROM chunks_fts "
+                "JOIN chunks c ON c.rowid = chunks_fts.rowid "
+                "WHERE chunks_fts MATCH ? ORDER BY score LIMIT ?",
+                (q, k),
+            ).fetchall()
     except sqlite3.OperationalError as e:
         log.warning("fts query failed for %r: %s", query, e)
         return []

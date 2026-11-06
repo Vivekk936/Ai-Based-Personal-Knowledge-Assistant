@@ -33,23 +33,25 @@ if __name__ == "__main__":
 
 import store
 from chunker import chunk_page
-from config import VISION_MODEL, vision_client
+from config import (
+    ENABLE_PDF_OCR,
+    MAX_UPLOAD_BYTES,
+    PDF_PAGE_BATCH_SIZE,
+    VISION_MODEL,
+    vision_client,
+)
 from extract import SUPPORTED_EXTENSIONS, extract, extension_of
 from retrieve import index_chunks
 
 log = logging.getLogger("ada.index")
 
-# Per-file guardrails. These are about a single file not monopolising the worker, not
-# about giving up on the folder — an oversized file is recorded as skipped with a reason
-# the user can see, never silently dropped.
-MAX_PAGES_PER_FILE = 3000
-MAX_CHUNKS_PER_FILE = 4000
-MAX_BYTES_DEFAULT = 200_000_000
+# Per-file guardrails. Configurable via environment variables.
+MAX_PAGES_PER_FILE = 5000
+MAX_CHUNKS_PER_FILE = 10000
+MAX_BYTES_DEFAULT = MAX_UPLOAD_BYTES
 
-# Text formats are cheap per byte; a 50MB wordlist is still 50MB of embeddings, and it
-# isn't prose anyone will ask questions about. The old global 1MB cap was aimed at this
-# case but caught every real PDF manual in the crossfire.
-MAX_BYTES_BY_EXT = {"txt": 20_000_000, "log": 5_000_000, "csv": 50_000_000, "json": 10_000_000}
+# Text formats are cheap per byte; a 50MB wordlist is still 50MB of embeddings
+MAX_BYTES_BY_EXT = {"txt": 50_000_000, "log": 20_000_000, "csv": 100_000_000, "json": 50_000_000}
 
 # The throttle. Sleeping a fraction of each file's own processing time keeps the worker
 # at a roughly constant duty cycle rather than a fixed rate: cheap files barely pause,
@@ -113,9 +115,9 @@ def _ocr_page(path: str, page_number: int) -> str:
     return resp.choices[0].message.content or ""
 
 
-def index_file(path: str, *, use_ocr: bool = False) -> dict:
-    """Extract, chunk, embed and store one file. Returns a result dict; never raises for
-    a bad file — the caller records the reason and moves on."""
+def index_file(path: str, *, use_ocr: bool = False, on_progress=None) -> dict:
+    """Extract, chunk, embed and store one file incrementally in page batches.
+    Prevents high memory spikes on large PDFs and allows progress tracking."""
     filename = os.path.basename(path)
     ext = extension_of(path)
     if ext not in SUPPORTED_EXTENSIONS:
@@ -127,68 +129,120 @@ def index_file(path: str, *, use_ocr: bool = False) -> dict:
         return {"state": "error", "error": str(e), "pages": 0, "chunks": 0}
     cap = MAX_BYTES_BY_EXT.get(ext, MAX_BYTES_DEFAULT)
     if size > cap:
-        return {"state": "skipped", "error": f"{size/1e6:.0f}MB exceeds {cap/1e6:.0f}MB cap for .{ext}",
-                "pages": 0, "chunks": 0}
+        return {
+            "state": "skipped",
+            "error": f"{size/1e6:.0f}MB exceeds {cap/1e6:.0f}MB cap for .{ext}",
+            "pages": 0,
+            "chunks": 0,
+        }
+
+    doc_id = hashlib.sha1(path.encode("utf-8", "replace")).hexdigest()[:16]
 
     try:
-        pages = list(extract(path, max_pages=MAX_PAGES_PER_FILE))
+        page_stream = extract(path, max_pages=MAX_PAGES_PER_FILE)
     except Exception as e:
         return {"state": "error", "error": f"extract: {e}", "pages": 0, "chunks": 0}
 
-    if use_ocr:
-        for p in pages:
-            if p.needs_ocr and ext == "pdf":
-                try:
-                    p.text = _ocr_page(path, p.number)
-                    p.kind = "ocr"
-                except Exception as e:
-                    log.warning("ocr failed %s p%d: %s", filename, p.number, e)
-
-    pages = [p for p in pages if p.text.strip()]
-    if not pages:
-        return {"state": "skipped", "error": "no extractable text (scanned? enable OCR)",
-                "pages": 0, "chunks": 0}
-
-    content_hash = _content_hash(pages)
-    doc_id = (content_hash or hashlib.sha1(path.encode("utf-8", "replace")).hexdigest())[:16]
-
-    # Identical content already indexed elsewhere: point at it instead of embedding it
-    # again. Dedup is by extracted text rather than file bytes because two exports of the
-    # same document differ byte-for-byte (writers stamp a fresh timestamp on every save),
-    # so byte-hashing would almost never catch a real duplicate.
-    if content_hash:
-        twin = store.find_indexed_doc(doc_id, path)
-        if twin:
-            return {"state": "skipped", "error": f"identical content already indexed as {os.path.basename(twin)}",
-                    "pages": len(pages), "chunks": 0, "doc_id": doc_id}
-
-    rows = []
-    for p in pages:
-        for text in chunk_page(p.text, p.kind):
-            if len(rows) >= MAX_CHUNKS_PER_FILE:
-                break
-            rows.append(
-                {
-                    # Monotonic within the document, not (page, i): a spreadsheet emits
-                    # several row-group pages that all carry the same sheet index, so
-                    # keying on page number collides and loses every group but the first.
-                    "id": f"{doc_id}_c{len(rows)}",
-                    "doc_id": doc_id,
-                    "path": path,
-                    "filename": filename,
-                    "page": p.number,
-                    "section": p.section,
-                    "kind": p.kind,
-                    "text": text,
-                }
-            )
+    total_pages = 0
+    total_chunks = 0
+    first_batch = True
+    first_batch_pages = []
 
     try:
-        index_chunks(rows)
-    except Exception as e:
-        return {"state": "error", "error": f"embed: {e}", "pages": len(pages), "chunks": 0}
+        while True:
+            batch_pages = []
+            for _ in range(PDF_PAGE_BATCH_SIZE):
+                try:
+                    p = next(page_stream)
+                    batch_pages.append(p)
+                except StopIteration:
+                    break
+                except Exception as e:
+                    log.warning("extract error on %s: %s", filename, e)
+                    break
 
-    return {"state": "indexed", "pages": len(pages), "chunks": len(rows), "doc_id": doc_id}
+            if not batch_pages:
+                break
+
+            if first_batch:
+                first_batch_pages = batch_pages
+
+            if use_ocr or ENABLE_PDF_OCR:
+                for p in batch_pages:
+                    if p.needs_ocr and ext == "pdf":
+                        try:
+                            p.text = _ocr_page(path, p.number)
+                            p.kind = "ocr"
+                        except Exception as e:
+                            log.warning("ocr failed %s p%d: %s", filename, p.number, e)
+
+            valid_pages = [p for p in batch_pages if p.text.strip()]
+            total_pages += len(batch_pages)
+
+            if valid_pages:
+                batch_rows = []
+                for p in valid_pages:
+                    for text in chunk_page(p.text, p.kind):
+                        if total_chunks + len(batch_rows) >= MAX_CHUNKS_PER_FILE:
+                            break
+                        batch_rows.append(
+                            {
+                                "id": f"{doc_id}_c{total_chunks + len(batch_rows)}",
+                                "doc_id": doc_id,
+                                "path": path,
+                                "filename": filename,
+                                "page": p.number,
+                                "section": p.section,
+                                "kind": p.kind,
+                                "text": text,
+                            }
+                        )
+
+                if batch_rows:
+                    index_chunks(batch_rows, clear_first=first_batch)
+                    total_chunks += len(batch_rows)
+
+            first_batch = False
+
+            # Update live indexing progress
+            store.mark(path, "indexing", pages=total_pages, chunks=total_chunks, doc_id=doc_id)
+            if on_progress:
+                on_progress(total_pages, total_chunks)
+
+            if total_chunks >= MAX_CHUNKS_PER_FILE:
+                log.info("Reached MAX_CHUNKS_PER_FILE limit for %s", filename)
+                break
+
+    except Exception as e:
+        log.exception("incremental index failed for %s", filename)
+        store.mark(path, "error", error=f"index: {e}", pages=total_pages, chunks=total_chunks)
+        return {"state": "error", "error": f"index: {e}", "pages": total_pages, "chunks": total_chunks}
+
+    if total_pages == 0 or total_chunks == 0:
+        return {
+            "state": "skipped",
+            "error": "no extractable text (scanned? enable OCR)",
+            "pages": total_pages,
+            "chunks": total_chunks,
+        }
+
+    # Dedup check based on text hash
+    if first_batch_pages:
+        content_hash = _content_hash(first_batch_pages)
+        if content_hash:
+            twin = store.find_indexed_doc(content_hash[:16], path)
+            if twin:
+                store.forget(path)
+                return {
+                    "state": "skipped",
+                    "error": f"identical content already indexed as {os.path.basename(twin)}",
+                    "pages": total_pages,
+                    "chunks": 0,
+                    "doc_id": content_hash[:16],
+                }
+
+    store.mark(path, "indexed", pages=total_pages, chunks=total_chunks, doc_id=doc_id)
+    return {"state": "indexed", "pages": total_pages, "chunks": total_chunks, "doc_id": doc_id}
 
 
 class Indexer:
@@ -200,7 +254,9 @@ class Indexer:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self.current: str | None = None
-        self.use_ocr = os.getenv("ADA_INDEX_OCR", "0") == "1"
+        self.current_pages: int = 0
+        self.current_chunks: int = 0
+        self.use_ocr = os.getenv("ADA_INDEX_OCR", "0") == "1" or ENABLE_PDF_OCR
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -218,6 +274,8 @@ class Indexer:
             batch = store.next_pending(limit=1)
             if not batch:
                 self.current = None
+                self.current_pages = 0
+                self.current_chunks = 0
                 self._stop.wait(POLL_SECONDS)
                 continue
             row = batch[0]
@@ -226,9 +284,16 @@ class Indexer:
                 store.forget(path)  # deleted or moved since the scan; not an error
                 continue
             self.current = path
+            self.current_pages = 0
+            self.current_chunks = 0
             started = time.time()
+
+            def on_progress(p, c):
+                self.current_pages = p
+                self.current_chunks = c
+
             try:
-                result = index_file(path, use_ocr=self.use_ocr)
+                result = index_file(path, use_ocr=self.use_ocr, on_progress=on_progress)
             except Exception as e:  # a single pathological file must never kill the worker
                 log.exception("indexing %s failed", path)
                 result = {"state": "error", "error": str(e)[:300], "pages": 0, "chunks": 0}
@@ -250,6 +315,8 @@ class Indexer:
         return {
             "running": bool(self._thread and self._thread.is_alive()),
             "current_file": os.path.basename(self.current) if self.current else None,
+            "current_pages": self.current_pages if self.current else 0,
+            "current_chunks": self.current_chunks if self.current else 0,
             **stats,
         }
 

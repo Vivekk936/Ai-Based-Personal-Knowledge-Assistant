@@ -158,15 +158,26 @@ def _pdf(path: str) -> Iterator[Page]:
         for i in range(len(pdf)):
             heading = marks.get(i, heading)
             section = " > ".join(p for p in (title, heading) if p)
+            page = None
+            textpage = None
             try:
                 page = pdf[i]
                 textpage = page.get_textpage()
                 text = textpage.get_text_range()
-                textpage.close()
-                page.close()
             except Exception as e:  # one broken page must not cost the other 199
                 log.warning("%s page %d unreadable: %s", path, i + 1, e)
                 continue
+            finally:
+                if textpage is not None:
+                    try:
+                        textpage.close()
+                    except Exception:
+                        pass
+                if page is not None:
+                    try:
+                        page.close()
+                    except Exception:
+                        pass
             if len(text.strip()) < MIN_PDF_TEXT_CHARS:
                 yield Page(i + 1, "", "scanned", section, needs_ocr=True)
             else:

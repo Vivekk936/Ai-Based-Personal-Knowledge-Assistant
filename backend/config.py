@@ -28,6 +28,20 @@ NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "120"))
 REQUEST_MAX_RETRIES = int(os.getenv("REQUEST_MAX_RETRIES", "2"))
 
+# Agent Loop Limits (Adaptive Execution)
+AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "25"))
+AGENT_WALL_CLOCK_SECONDS = int(os.getenv("AGENT_WALL_CLOCK_SECONDS", "600"))
+AGENT_MAX_TOOL_CALLS = int(os.getenv("AGENT_MAX_TOOL_CALLS", "35"))
+AGENT_MAX_REPAIRS = int(os.getenv("AGENT_MAX_REPAIRS", "3"))
+
+# PDF & Document Ingestion & Chunking
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "150000000"))  # 150MB default
+PDF_PAGE_BATCH_SIZE = int(os.getenv("PDF_PAGE_BATCH_SIZE", "25"))   # Incremental batch
+CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1000"))                   # Target chunk character count
+CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "150"))              # Chunk character overlap
+ENABLE_PDF_OCR = os.getenv("ENABLE_PDF_OCR", "0").lower() in ("1", "true", "yes")
+INDEXING_TIMEOUT_SECONDS = int(os.getenv("INDEXING_TIMEOUT_SECONDS", "600"))
+
 DATA_DIR = Path(os.getenv("ADA_DATA_DIR") or (_BACKEND_DIR / "ada_data"))
 OUTPUT_DIR = DATA_DIR / "output"
 RUNS_DIR = DATA_DIR / "runs"
@@ -89,7 +103,8 @@ def keep_warm(model: str, minutes: int = 60) -> None:
 
 
 # Batch size for embedding requests
-EMBED_BATCH = int(os.getenv("EMBED_BATCH", "64"))
+EMBED_BATCH = int(os.getenv("EMBED_BATCH_SIZE") or os.getenv("EMBED_BATCH", "32"))
+EMBED_BATCH_SIZE = EMBED_BATCH
 
 
 def embed_texts(texts: list[str], input_type: str = "passage") -> list[list[float]]:

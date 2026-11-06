@@ -11,9 +11,14 @@ useless if the reader can't tell what it's about.
      which document and which section the text came from.
 """
 import re
+try:
+    from config import CHUNK_OVERLAP, CHUNK_SIZE
+    TARGET_CHARS = CHUNK_SIZE
+    OVERLAP_CHARS = CHUNK_OVERLAP
+except Exception:
+    TARGET_CHARS = 1000
+    OVERLAP_CHARS = 150
 
-TARGET_CHARS = 900
-OVERLAP_CHARS = 110
 MIN_CHUNK_CHARS = 60
 
 _PARA = re.compile(r"\n\s*\n")
@@ -23,35 +28,49 @@ _SENT = re.compile(r"(?<=[.!?])\s+")
 _ROWISH = re.compile(r"^\s*(\||[^:\n]{1,60}:\s)", re.M)
 
 
-def _split_oversized(text: str) -> list[str]:
+def _split_oversized(
+    text: str,
+    target_chars: int | None = None,
+    overlap_chars: int | None = None,
+) -> list[str]:
     """Break a too-long block at the best boundary available, preferring sentence ends
     and falling back to whitespace. Hard character slicing is the last resort."""
-    if len(text) <= TARGET_CHARS:
+    target = target_chars or TARGET_CHARS
+    overlap = overlap_chars if overlap_chars is not None else OVERLAP_CHARS
+    if len(text) <= target:
         return [text]
     out, rest = [], text
-    while len(rest) > TARGET_CHARS:
-        window = rest[:TARGET_CHARS]
+    while len(rest) > target:
+        window = rest[:target]
         cut = -1
         for m in _SENT.finditer(window):
             cut = m.end()
         if cut < MIN_CHUNK_CHARS:
             cut = window.rfind(" ")
         if cut < MIN_CHUNK_CHARS:
-            cut = TARGET_CHARS
+            cut = target
         out.append(rest[:cut].strip())
-        rest = rest[max(0, cut - OVERLAP_CHARS):].lstrip()
+        rest = rest[max(0, cut - overlap):].lstrip()
     if rest.strip():
         out.append(rest.strip())
     return [c for c in out if c]
 
 
-def chunk_page(text: str, kind: str = "text") -> list[str]:
+def chunk_page(
+    text: str,
+    kind: str = "text",
+    target_chars: int | None = None,
+    overlap_chars: int | None = None,
+) -> list[str]:
     """Paragraph-packing: accumulate whole paragraphs until adding the next would
     overshoot, then emit. Keeps related prose together instead of slicing every
     TARGET_CHARS regardless of meaning."""
     text = (text or "").strip()
     if not text:
         return []
+
+    target = target_chars or TARGET_CHARS
+    overlap = overlap_chars if overlap_chars is not None else OVERLAP_CHARS
 
     # Tables and spreadsheet row-groups arrive pre-structured from extract.py and are
     # already sized by the extractor. Re-packing them would interleave rows from
@@ -64,15 +83,15 @@ def chunk_page(text: str, kind: str = "text") -> list[str]:
         para = para.strip()
         if not para:
             continue
-        if len(para) > TARGET_CHARS:
+        if len(para) > target:
             if buf:
                 chunks.append(buf)
                 buf = ""
-            chunks.extend(_split_oversized(para))
+            chunks.extend(_split_oversized(para, target_chars=target, overlap_chars=overlap))
             continue
-        if buf and len(buf) + len(para) + 2 > TARGET_CHARS:
+        if buf and len(buf) + len(para) + 2 > target:
             chunks.append(buf)
-            buf = buf[-OVERLAP_CHARS:].lstrip() + "\n\n" + para if OVERLAP_CHARS else para
+            buf = buf[-overlap:].lstrip() + "\n\n" + para if overlap else para
         else:
             buf = f"{buf}\n\n{para}" if buf else para
     if buf:

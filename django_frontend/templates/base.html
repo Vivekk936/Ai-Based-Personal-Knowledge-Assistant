@@ -1,0 +1,29 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Ada — Document Intelligence Agent{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="{% static 'images/favicon.svg' %}">
+  <link rel="stylesheet" href="{% static 'css/ada.css' %}">
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  {% include 'components/loading_screen.html' %}
+
+  <div class="app-container">
+    {% include 'components/sidebar.html' %}
+
+    <main class="main-content">
+      <div class="view-viewport">
+        {% block content %}{% endblock %}
+      </div>
+      {% include 'components/status_bar.html' %}
+    </main>
+  </div>
+
+  <script src="{% static 'js/ada.js' %}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -140,14 +140,18 @@ def sessions_rename(session_id: str, req: RenameRequest):
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    attachments: list[str] = []
 
 
 @app.post("/chat")
 def chat(req: ChatRequest):
     """Blocking chat, kept for scripting and tests. The UI uses /chat/stream."""
     history = chat_store.get_messages(req.session_id)
-    result = run_agent(req.message, history=history, session_id=req.session_id)
-    chat_store.add_message(req.session_id, "user", req.message)
+    result = run_agent(req.message, history=history, session_id=req.session_id, attachments=req.attachments)
+    user_entry = req.message
+    if req.attachments:
+        user_entry += f"\n[Attached: {', '.join(req.attachments)}]"
+    chat_store.add_message(req.session_id, "user", user_entry)
     chat_store.add_message(req.session_id, "assistant", result["answer"])
     return result
 
@@ -159,7 +163,12 @@ def chat_stream(req: ChatRequest):
     def events():
         answer = ""
         try:
-            for ev in run_agent_stream(req.message, history=history, session_id=req.session_id):
+            for ev in run_agent_stream(
+                req.message,
+                history=history,
+                session_id=req.session_id,
+                attachments=req.attachments,
+            ):
                 if ev["t"] == "done":
                     answer = ev["answer"]
                 yield f"data: {json.dumps(ev)}\n\n"
@@ -169,7 +178,10 @@ def chat_stream(req: ChatRequest):
         finally:
             # Persist even on an aborted stream, so a cancelled or crashed run still
             # leaves the user's question (and whatever was produced) in the transcript.
-            chat_store.add_message(req.session_id, "user", req.message)
+            user_entry = req.message
+            if req.attachments:
+                user_entry += f"\n[Attached: {', '.join(req.attachments)}]"
+            chat_store.add_message(req.session_id, "user", user_entry)
             if answer:
                 chat_store.add_message(req.session_id, "assistant", answer)
 
