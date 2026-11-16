@@ -25,9 +25,8 @@ class AdaFrontendViewsTest(TestCase):
     def test_organizer_view_renders(self):
         res = self.client.get('/organizer/')
         self.assertEqual(res.status_code, 200)
-        self.assertContains(res, "Smart File Organizer")
-        self.assertContains(res, "btn-analyze")
-        self.assertContains(res, "btn-apply-moves")
+        self.assertContains(res, "Active Document Inventory")
+        self.assertContains(res, "organizer-upload-input")
 
     def test_evaluation_view_renders(self):
         res = self.client.get('/evaluation/')

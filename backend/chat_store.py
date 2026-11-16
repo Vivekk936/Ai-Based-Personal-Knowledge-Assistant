@@ -1,17 +1,3 @@
-"""Persisted chat sessions and messages — SQLite, same pattern as store.py.
-Keeps the frontend simple: it never manages conversation history itself, it just
-references a session_id and the server keeps the transcript.
-
-Separate from store.py's database on purpose: conversations are the user's data and the
-index is a derived cache. Keeping them apart means the index can be deleted and rebuilt
-without touching a single chat.
-
-A fresh connection per call (not a shared module-level one) is deliberate: FastAPI
-runs sync routes in a thread pool, and sqlite3 connections aren't safe to share
-across threads without extra care — one connection per call sidesteps that
-entirely, and SQLite's own connection overhead is negligible next to a network or
-model call.
-"""
 import sqlite3
 import time
 import uuid

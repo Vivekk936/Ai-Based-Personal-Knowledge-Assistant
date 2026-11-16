@@ -225,9 +225,11 @@ def evaluate_faithfulness(
     evidence_text = "\n".join(c.get("text", "") for c in context_chunks)
     evidence_lower = evidence_text.lower()
 
-    sentences = [s.strip() for s in _SENTENCE_SPLIT.split(answer) if len(s.strip()) > 10]
+    # Strip bracketed citations before sentence splitting so citation tags are not counted as standalone factual claims
+    answer_clean = re.sub(r"\[[^\]]+:\d+\]", "", answer).strip()
+    sentences = [s.strip() for s in _SENTENCE_SPLIT.split(answer_clean) if len(s.strip()) > 10]
     if not sentences:
-        sentences = [answer.strip()]
+        sentences = [answer_clean] if answer_clean else [answer.strip()]
 
     bad_numbers = _unsupported_numbers(answer, evidence_text)
 
@@ -554,14 +556,17 @@ def generate_answer_for_query(
         try:
             import config
             ctx_parts = []
-            for h in hits[:3]:
+            for h in hits[:5]:
                 h_fn = h.get("filename", "")
                 h_pg = h.get("page", 1)
-                ctx_parts.append(f"[{h_fn}:{h_pg}]\n{h.get('text', '')}")
+                txt = h.get("text", "").strip()
+                if txt:
+                    ctx_parts.append(f"[{h_fn}:{h_pg}]\n{txt}")
             ctx_text = "\n\n".join(ctx_parts)
 
             system_prompt = (
                 "You are an expert QA assistant. Answer the user question based strictly on the provided context excerpts.\n"
+                "State the exact answer clearly, accurately, and completely using the information in the context excerpts.\n"
                 "Every factual claim MUST include a citation in the format [filename:page] using the citation tags in the context.\n"
                 "If the context does not contain the answer, state clearly: 'The provided document does not contain information to answer this question.'"
             )
@@ -572,15 +577,21 @@ def generate_answer_for_query(
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                max_tokens=300,
+                max_tokens=1500,
                 temperature=0.1,
             )
-            ans_text = resp.choices[0].message.content or ""
+            msg = resp.choices[0].message
+            ans_text = (msg.content or "").strip()
+            if not ans_text and getattr(msg, "reasoning_content", None):
+                r_text = msg.reasoning_content.strip()
+                ans_text = r_text.split("\n\n")[-1].strip()
+
             citations = list(set(re.findall(r"\[[^\]]+:\d+\]", ans_text)))
-            if not citations:
+            if not citations and ans_text:
                 citations = [citation]
                 ans_text += f" {citation}"
-            return ans_text.strip(), citations
+            if ans_text:
+                return ans_text, citations
         except Exception as e:
             log.warning("Online LLM answer generation failed (%s); using synthesis fallback", e)
 
@@ -590,7 +601,7 @@ def generate_answer_for_query(
 
     matched_lines = []
     seen = set()
-    for h in hits[:2]:
+    for h in hits[:3]:
         for line in h.get("text", "").split("\n"):
             line_str = line.strip()
             if not line_str or len(line_str) < 5 or line_str in seen:
@@ -614,8 +625,11 @@ def generate_answer_for_query(
         citation = f"[{fn_top}:{p_top}]"
         return f"{body} {citation}", [citation]
 
-    first_line = top_hit.get("text", "").split("\n")[0].strip()
-    return f"{first_line} {citation}", [citation]
+    for line in top_hit.get("text", "").split("\n"):
+        line_clean = line.strip()
+        if len(line_clean) > 10 and not line_clean.startswith("#"):
+            return f"{line_clean} {citation}", [citation]
+    return f"{top_hit.get('text', '').strip()[:200]} {citation}", [citation]
 
 
 # ---------------------------------------------------------------------------

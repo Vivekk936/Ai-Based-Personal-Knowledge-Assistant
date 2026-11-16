@@ -353,11 +353,24 @@ def get_chunks(ids: list[str]) -> dict[str, dict]:
         conn.close()
 
 
+_FTS_STOP_WORDS = {
+    "what", "which", "where", "when", "who", "whom", "how", "why", "does", "did", "do",
+    "the", "for", "and", "is", "are", "was", "were", "been", "being", "stated", "state",
+    "regarding", "according", "with", "from", "that", "this", "these", "those", "have",
+    "has", "had", "will", "would", "could", "should", "about", "into", "onto", "than"
+}
+
+
 def _fts_query(text: str) -> str:
     """FTS5 treats most punctuation as syntax, so a raw user question like
     'what is P-101's limit?' is a syntax error rather than a search. Quoting each token
-    turns the query into a plain OR-of-terms, which is what a BM25 pre-filter wants."""
-    tokens = [t for t in "".join(c if c.isalnum() else " " for c in text).split() if len(t) > 1]
+    turns the query into a plain OR-of-terms, which is what a BM25 pre-filter wants.
+    Filtering out high-frequency question stopwords prioritizes real domain keywords."""
+    all_tokens = [t for t in "".join(c if c.isalnum() else " " for c in text).split() if len(t) > 1]
+    if not all_tokens:
+        return ""
+    content_tokens = [t for t in all_tokens if t.lower() not in _FTS_STOP_WORDS]
+    tokens = content_tokens if content_tokens else all_tokens
     return " OR ".join(f'"{t}"' for t in tokens[:32])
 
 

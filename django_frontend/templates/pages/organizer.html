@@ -1,83 +1,27 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Smart File Organizer — Ada Intelligence{% endblock %}
+{% block title %}Documents — Ada Intelligence{% endblock %}
 
 {% block content %}
 <div class="panel-page">
   <!-- Page Header -->
   <div class="page-header">
     <div>
-      <div class="page-kicker">File System Intelligence</div>
-      <h1 class="page-title">Universal File Organizer</h1>
-      <p class="page-desc">Classify, structure, and organize loose files across all enterprise formats.</p>
+      <div class="page-kicker">Document Index</div>
+      <h1 class="page-title">Active Document Inventory</h1>
+      <p class="page-desc">Indexed files available for grounded RAG synthesis and search.</p>
     </div>
-    <span class="status-badge" style="background: rgba(224, 138, 91, 0.12); color: var(--color-accent); border: 1px solid rgba(224, 138, 91, 0.3);">
-      NON-DESTRUCTIVE
-    </span>
+    <label class="btn-primary" style="cursor: pointer;">
+      + Upload Files
+      <input type="file" id="organizer-upload-input" multiple style="display: none;" accept=".pdf,.xlsx,.csv,.docx,.pptx,.txt,.md,.py,.json">
+    </label>
   </div>
 
   <div id="organizer-status-message" style="display: none; padding: 10px 14px; border-radius: 8px; background: var(--bg-panel-raised); border: 1px solid var(--border-color); font-size: 12.5px; margin-bottom: 16px;"></div>
 
-  <!-- Scan & Analyze Card -->
+  <!-- Document Inventory Table -->
   <div class="pro-card">
-    <div style="font-size: 13px; font-weight: 700; color: var(--text-bright); margin-bottom: 8px;">
-      Directory Analysis & Taxonomy Reorganization
-    </div>
-    <p style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 14px;">
-      Specify a directory to analyze loose documents, classify them by business taxonomy, and review relocation proposals.
-    </p>
-
-    <div class="form-group">
-      <label class="form-label" for="target-folder-input">Target Directory Path</label>
-      <div style="display: flex; gap: 8px;">
-        <input type="text" id="target-folder-input" class="form-input" style="flex: 1;" placeholder="e.g. C:\Users\Documents\Work" value="{% if granted_folders %}{{ granted_folders.0 }}{% endif %}">
-        <button type="button" id="btn-browse-folder" class="btn-secondary">Browse...</button>
-        <button type="button" id="btn-analyze" class="btn-primary">Analyze Directory</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Move Proposals Section (Hidden until analyzed) -->
-  <div id="proposals-section" class="pro-card" style="display: none;">
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
-      <div>
-        <div style="font-size: 13px; font-weight: 700; color: var(--text-bright);">Review Relocation Proposals</div>
-        <p style="font-size: 12px; color: var(--text-muted);">Select proposals to approve before executing moves.</p>
-      </div>
-      <button type="button" id="btn-apply-moves" class="btn-primary">Apply Approved Moves</button>
-    </div>
-
-    <div class="data-table-wrapper">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th style="width: 36px; text-align: center;">Approve</th>
-            <th>File</th>
-            <th>Proposed Destination</th>
-            <th>Classification Reason</th>
-          </tr>
-        </thead>
-        <tbody id="proposals-table-body">
-          <!-- Proposals injected dynamically -->
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Document Ingestion & Inventory Card -->
-  <div class="pro-card">
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-      <div>
-        <div style="font-size: 13px; font-weight: 700; color: var(--text-bright);">Active Document Inventory</div>
-        <p style="font-size: 12px; color: var(--text-muted);">Indexed files available for grounded RAG synthesis and search.</p>
-      </div>
-      <label class="btn-secondary" style="cursor: pointer;">
-        + Upload Files
-        <input type="file" id="organizer-upload-input" multiple style="display: none;" accept=".pdf,.xlsx,.csv,.docx,.pptx,.txt,.md,.py,.json">
-      </label>
-    </div>
-
     <div class="data-table-wrapper">
       <table class="data-table">
         <thead>
@@ -119,8 +63,8 @@
             </tr>
           {% empty %}
             <tr>
-              <td colspan="6" style="text-align: center; color: var(--text-subtle); padding: 24px;">
-                No documents uploaded yet. Click "+ Upload Files" to index documents into the system.
+              <td colspan="6" style="text-align: center; color: var(--text-subtle); padding: 32px;">
+                No documents uploaded yet. Click "+ Upload Files" above to index documents into the system.
               </td>
             </tr>
           {% endfor %}
