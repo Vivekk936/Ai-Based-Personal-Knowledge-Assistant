@@ -143,9 +143,6 @@ Run the unified startup script:
 ```bash
 # Starts FastAPI + Django and automatically opens your web browser
 python run_app.py
-
-# Or on Windows, double-click:
-start.bat
 ```
 
 Command-line flags:

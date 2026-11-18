@@ -1,8 +1,6 @@
 import sqlite3
 import time
 import uuid
-from pathlib import Path
-
 from config import DATA_DIR
 
 DB_PATH = DATA_DIR / "chats.db"

@@ -48,10 +48,8 @@ backend/.venv/
 !.env.example
 backend/.env
 backend/.env.*
-!backend/.env.example
 django_frontend/.env
 django_frontend/.env.*
-!django_frontend/.env.example
 
 # ------------------------------------------------------------------------------
 # Databases & SQLite

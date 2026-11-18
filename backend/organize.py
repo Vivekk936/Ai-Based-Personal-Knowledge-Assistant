@@ -4,7 +4,6 @@ import os
 import shutil
 import time
 from collections import defaultdict
-from pathlib import Path
 
 from config import DATA_DIR
 from store import list_files, SKIP_DIRS

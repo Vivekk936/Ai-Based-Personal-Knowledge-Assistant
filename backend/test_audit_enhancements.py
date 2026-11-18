@@ -1,7 +1,6 @@
 import os
 import shutil
 import tempfile
-import json
 import unittest
 
 os.environ.setdefault("ADA_DATA_DIR", os.path.join(tempfile.gettempdir(), "ada_audit_test_data"))
