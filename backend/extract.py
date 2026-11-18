@@ -1,11 +1,3 @@
-"""Format-aware text extraction: turns any supported file into a stream of small,
-individually-citable Pages. Splitting matters more than parsing — a whole 60-sheet
-workbook or a 200-page manual as one blob retrieves as one undifferentiated hit, so
-every format is broken at its own natural seam (PDF page, docx heading, sheet row
-group, slide) and the seam name is kept in `section` so a citation can say where it
-came from. Nothing here rasterizes, OCRs or calls a model: pages with no text layer
-are flagged `needs_ocr` and handed back for the caller to decide about.
-"""
 import csv
 import logging
 import os
@@ -16,12 +8,11 @@ from html.parser import HTMLParser
 
 log = logging.getLogger("ada.extract")
 
-MIN_PDF_TEXT_CHARS = 40  # below this a PDF page is a scan, not a text layer
+MIN_PDF_TEXT_CHARS = 40
 CHUNK_CHARS = 8000
 ROWS_PER_PAGE = 40
-# A spreadsheet is the one format where a single file can hold a million rows of
-# machine-generated data that no one will ever ask a question about. Read the first
-# 20k and say so, rather than emitting 25,000 pages for one file.
+
+
 MAX_SHEET_ROWS = 20_000
 
 TEXT_EXTENSIONS = {"txt", "md", "log", "json", "yaml", "yml", "xml", "html", "htm"}
@@ -55,9 +46,6 @@ def is_supported(path: str) -> bool:
 
 
 def extract(path: str, *, max_pages: int = 5000) -> Iterator[Page]:
-    """Lazy page stream. A corrupt or unreadable file yields nothing (logged); only a
-    genuinely unsupported extension raises — and it raises here, at call time, rather
-    than on the first next() like it would from a plain generator function."""
     ext = extension_of(path)
     if ext not in SUPPORTED_EXTENSIONS:
         raise ValueError(f"unsupported file type: .{ext}")
@@ -90,15 +78,15 @@ def _stream(path: str, ext: str, max_pages: int) -> Iterator[Page]:
             emitted += 1
             if emitted >= max_pages:
                 return
-    except Exception as e:  # unreadable/corrupt is a normal outcome in a real folder
+    except Exception as e:
         log.warning("extract failed for %s: %s", path, e)
 
 
 def _clean(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = "\n".join(line.rstrip() for line in text.split("\n"))
-    # One blank line separates paragraphs and two mark a section break — both carry
-    # meaning, so only longer runs (page-break gutters, empty table cells) collapse.
+
+
     return _BLANK_RUN.sub("\n\n\n", text).strip()
 
 
@@ -107,8 +95,6 @@ def _split_chars(text: str) -> list[str]:
 
 
 def _table_blocks(rows: list[list[str]]) -> Iterator[str]:
-    """Pipe-delimited, header repeated on every block — a retrieval hit on row 300 of
-    a long table is useless if the column names stayed behind on the first block."""
     if not rows:
         return
     header = " | ".join(rows[0])
@@ -120,8 +106,6 @@ def _table_blocks(rows: list[list[str]]) -> Iterator[str]:
 
 
 def _row_pages(number: int, section: str, header: list[str], rows, note: str) -> Iterator[Page]:
-    """Schema page first, then row groups rendered as `header: value` — so a hit lands
-    on the handful of rows that actually answer the question, not the whole sheet."""
     yield Page(number, f"{section}\nColumns ({len(header)}): {' | '.join(header)}\n{note}", "sheet", section)
 
     group, taken = [], 0
@@ -142,11 +126,6 @@ def _row_pages(number: int, section: str, header: list[str], rows, note: str) ->
         yield Page(number, "\n".join(group), "table", section)
 
 
-# Third-party parsers are imported per format rather than at module level: importing
-# openpyxl + python-pptx + Pillow + pdfium on every server start costs ~a second for
-# libraries most requests never touch.
-
-
 def _pdf(path: str) -> Iterator[Page]:
     import pypdfium2 as pdfium
 
@@ -164,7 +143,7 @@ def _pdf(path: str) -> Iterator[Page]:
                 page = pdf[i]
                 textpage = page.get_textpage()
                 text = textpage.get_text_range()
-            except Exception as e:  # one broken page must not cost the other 199
+            except Exception as e:
                 log.warning("%s page %d unreadable: %s", path, i + 1, e)
                 continue
             finally:
@@ -187,8 +166,6 @@ def _pdf(path: str) -> Iterator[Page]:
 
 
 def _pdf_outline(pdf) -> dict[int, str]:
-    """Bookmark title by 0-based page index. Flat, not a nested path: pdfium doesn't
-    hand back bookmark depth, and a nearest-heading label is most of the value."""
     marks = {}
     try:
         for bookmark in pdf.get_toc():
@@ -210,8 +187,7 @@ def _docx(path: str) -> Iterator[Page]:
     buf: list[str] = []
     n = 0
 
-    # Body order, not paragraphs-then-tables: a table belongs where it was written,
-    # under the heading it was written under.
+
     for child in document.element.body.iterchildren():
         tag = child.tag.rsplit("}", 1)[-1]
         if tag == "p":
@@ -249,8 +225,7 @@ def _docx(path: str) -> Iterator[Page]:
 def _xlsx(path: str) -> Iterator[Page]:
     import openpyxl
 
-    # read_only keeps a 200MB workbook streaming instead of building a cell object
-    # per cell; data_only gives cached formula results instead of "=SUM(A1:A9)".
+
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
         for index, ws in enumerate(wb.worksheets, start=1):
@@ -266,7 +241,7 @@ def _xlsx(path: str) -> Iterator[Page]:
                 if declared > MAX_SHEET_ROWS:
                     note += f" (truncated to the first {MAX_SHEET_ROWS} rows)"
                 yield from _row_pages(index, section, header, rows, note)
-            except Exception as e:  # one corrupt sheet must not lose the workbook
+            except Exception as e:
                 log.warning("%s sheet %r unreadable: %s", path, ws.title, e)
     finally:
         wb.close()
@@ -294,8 +269,8 @@ def _pptx(path: str) -> Iterator[Page]:
 
 
 def _delimited(path: str, ext: str) -> Iterator[Page]:
-    # utf-8-sig drops Excel's BOM; errors="replace" means a latin-1 export degrades to
-    # a few odd characters instead of an exception.
+
+
     with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
         sample = f.read(8192)
         f.seek(0)
@@ -322,8 +297,8 @@ def _image(path: str) -> Iterator[Page]:
 
 def _plain(path: str, ext: str) -> Iterator[Page]:
     if ext in ("md", "html", "htm") or ext in CODE_EXTENSIONS:
-        # These are split by structure, which needs the whole text — bounded in
-        # practice because the caller size-caps files before ingesting them.
+
+
         with open(path, encoding="utf-8", errors="replace") as f:
             text = f.read()
         blocks = _markdown_blocks(text) if ext == "md" else _code_blocks(text) if ext in CODE_EXTENSIONS else [("", _strip_html(text))]
@@ -334,8 +309,7 @@ def _plain(path: str, ext: str) -> Iterator[Page]:
                 yield Page(n, chunk, "text", section)
         return
 
-    # Plain text is the one format that is routinely gigabytes (logs, dumps), so it
-    # is read a page at a time and never lands in memory whole.
+
     with open(path, encoding="utf-8", errors="replace") as f:
         n = 0
         while True:
@@ -372,7 +346,6 @@ def _code_blocks(text: str) -> list[tuple[str, str]]:
 
 
 class _TextOnly(HTMLParser):
-    """Minimal tag stripper — bs4/lxml would be a dependency for twenty lines."""
 
     def __init__(self):
         super().__init__()
@@ -404,8 +377,6 @@ def _strip_html(text: str) -> str:
 
 
 def demo() -> None:
-    """Builds one real file per family, extracts it, and asserts the splitting
-    actually happened. Run: python extract.py"""
     import ctypes
     import tempfile
 
@@ -418,9 +389,9 @@ def demo() -> None:
     from pptx.util import Inches
 
     tmp = tempfile.mkdtemp(prefix="ada_extract_")
-    out = lambda name: os.path.join(tmp, name)  # noqa: E731
+    out = lambda name: os.path.join(tmp, name)
 
-    # --- docx: headings + an interleaved table, non-ASCII filename on purpose ---
+
     docx_path = out("Bericht Grüße 文書.docx")
     d = Document()
     d.add_heading("Chapter 3", level=1)
@@ -442,11 +413,11 @@ def demo() -> None:
     table_pages = [p for p in pages if p.kind == "table"]
     assert table_pages and "Component | Limit" in table_pages[0].text
     assert "Pump P-101 | 150 PSI" in table_pages[0].text
-    # table sits under the heading it was written under, i.e. body order was preserved
+
     assert table_pages[0].section == "Chapter 3 > Safety", table_pages[0].section
     print(f"PASS docx    {len(pages)} pages, {len(table_pages)} table page(s), sections {sorted(set(sections))}")
 
-    # --- xlsx: 100 rows on sheet 1 must not come back as one page ---
+
     xlsx_path = out("book.xlsx")
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -468,7 +439,7 @@ def demo() -> None:
     assert any(p.section == "Sheet: Notes" and "Renewal due in April" in p.text for p in pages)
     print(f"PASS xlsx    {len(pages)} pages ({len(sheet1)} for the 100-row sheet), 2 sheets seen")
 
-    # --- pptx ---
+
     pptx_path = out("deck.pptx")
     prs = Presentation()
     s1 = prs.slides.add_slide(prs.slide_layouts[1])
@@ -489,7 +460,7 @@ def demo() -> None:
     assert "Quarter | Total" in pages[1].text and "Q3 | 1.2M" in pages[1].text
     print(f"PASS pptx    {len(pages)} slides, notes and table content present")
 
-    # --- csv ---
+
     csv_path = out("rows.csv")
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         f.write("name,city\n")
@@ -501,7 +472,7 @@ def demo() -> None:
     assert any("name: Person 42 | city: Køge" in p.text for p in pages)
     print(f"PASS csv     {len(pages)} pages (1 schema + row groups)")
 
-    # --- md / txt / html ---
+
     md_path = out("notes.md")
     with open(md_path, "w", encoding="utf-8") as f:
         f.write("# Handbook\n\nWelcome.\n\n## Leave policy\n\nTwenty days a year.\n\n## Expenses\n\nSubmit monthly.\n")
@@ -534,7 +505,7 @@ def demo() -> None:
     assert pages[1].section == "def alpha():" and "return 1" in pages[1].text
     print(f"PASS code    split into {len(pages)} blocks: {[p.section for p in pages]}")
 
-    # --- image ---
+
     png_path = out("shot.png")
     Image.new("RGB", (320, 200), "white").save(png_path)
     pages = list(extract(png_path))
@@ -543,7 +514,7 @@ def demo() -> None:
     assert pages[0].section == "Image 320x200 RGB", pages[0].section
     print(f"PASS image   1 page, needs_ocr=True, section={pages[0].section!r}")
 
-    # --- pdf: page 1 has a text layer, page 2 is blank and must come back as scanned ---
+
     pdf_path = out("manual.pdf")
     doc = pdfium.PdfDocument.new()
     font = pdfium_c.FPDFText_LoadStandardFont(doc, b"Helvetica")
@@ -565,7 +536,7 @@ def demo() -> None:
     assert pages[1].kind == "scanned" and pages[1].needs_ocr and pages[1].text == ""
     print("PASS pdf     2 pages, text layer read, blank page flagged needs_ocr")
 
-    # --- failure modes: corrupt and missing must be silent zero-page outcomes ---
+
     for name, blob in [("broken.pdf", b"%PDF-1.4 not really"), ("broken.docx", b"PK\x03\x04junk"), ("broken.xlsx", b"nope")]:
         with open(out(name), "wb") as f:
             f.write(blob)
@@ -582,7 +553,7 @@ def demo() -> None:
     assert is_supported("C:\\x\\Grüße.DOCX") and not is_supported("x.zip")
     assert extension_of("C:\\x\\a.b.PDF") == "pdf"
 
-    # max_pages is a hard stop, not a suggestion
+
     assert len(list(extract(csv_path, max_pages=2))) == 2
     print("PASS api     ValueError on unsupported ext, max_pages honored, helpers correct")
     print(f"\nAll checks passed. Scratch files in {tmp}")

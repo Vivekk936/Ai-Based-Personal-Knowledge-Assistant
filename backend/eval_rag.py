@@ -1,15 +1,3 @@
-"""Comprehensive RAG Evaluation Framework for Ada.
-
-Evaluates the 4 foundational pillars of Retrieval-Augmented Generation on ACTUAL
-uploaded PDFs (NO dummy data):
-1. Retrieval Accuracy: Hit Rate@1, Hit Rate@3, Hit Rate@5, and Mean Reciprocal Rank (MRR).
-2. Answer Correctness: Key Fact Recall, Token-level F1, and abstention fidelity.
-3. Faithfulness (Groundedness): Evidence support, unsupported figure detection, and hallucination rate.
-4. Response Time: Retrieval latency, generation latency, total turnaround, P50, P90, P95, and min/max.
-
-Can be run standalone:
-    python eval_rag.py [--pdf path/to/uploaded.pdf] [--offline] [--output eval_rag_results.json]
-"""
 import argparse
 import hashlib
 import json
@@ -23,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-# Ensure backend directory is in sys.path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 log = logging.getLogger("ada.eval_rag")
@@ -31,14 +19,9 @@ log = logging.getLogger("ada.eval_rag")
 DEFAULT_RESULTS = Path(__file__).resolve().parent / "eval_rag_results.json"
 
 
-# ---------------------------------------------------------------------------
-# Metric 1: Retrieval Accuracy
-# ---------------------------------------------------------------------------
-
 def evaluate_retrieval(hits: list[dict], target_doc: str | None, target_snippets: list[str]) -> dict:
-    """Evaluates Hit Rate @ k, MRR, Recall and Precision over retrieved chunks for a query."""
     if not target_doc and not target_snippets:
-        # Negative / out-of-corpus query where no document contains the answer
+
         return {
             "is_out_of_corpus": True,
             "hit_at_1": None,
@@ -57,7 +40,7 @@ def evaluate_retrieval(hits: list[dict], target_doc: str | None, target_snippets
         hit_fn = hit.get("filename", "").lower()
         hit_text = hit.get("text", "").lower()
 
-        # Match either exact filename or significant target snippet
+
         doc_match = bool(target_clean and (target_clean in hit_fn or hit_fn in target_clean))
         snippet_match = False
         if target_snippets:
@@ -81,7 +64,7 @@ def evaluate_retrieval(hits: list[dict], target_doc: str | None, target_snippets
     hit_at_3 = 1.0 if (relevant_rank is not None and relevant_rank <= 3) else 0.0
     hit_at_5 = 1.0 if (relevant_rank is not None and relevant_rank <= 5) else 0.0
 
-    # Top-3 precision and recall
+
     top_3 = hits[:3]
     relevant_in_top_3 = sum(
         1 for h in top_3
@@ -102,17 +85,12 @@ def evaluate_retrieval(hits: list[dict], target_doc: str | None, target_snippets
     }
 
 
-# ---------------------------------------------------------------------------
-# Metric 2: Answer Correctness
-# ---------------------------------------------------------------------------
-
 _TOKEN_RE = re.compile(r"\w+")
 
 def _tokenize(text: str) -> list[str]:
     return [t.lower() for t in _TOKEN_RE.findall(text)]
 
 def evaluate_correctness(candidate: str, reference: str, key_facts: list[str], expected_abstain: bool = False) -> dict:
-    """Evaluates fact recall, token-level F1 overlap, and abstention accuracy."""
     cand_norm = candidate.strip()
     cand_tokens = _tokenize(cand_norm)
     ref_tokens = _tokenize(reference)
@@ -170,15 +148,10 @@ def evaluate_correctness(candidate: str, reference: str, key_facts: list[str], e
     }
 
 
-# ---------------------------------------------------------------------------
-# Metric 3: Faithfulness & Groundedness
-# ---------------------------------------------------------------------------
-
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 _NUMBER_RE = re.compile(r"\b\d[\d,]*\.?\d*\s*(?:%|PSI|bar|mm|cm|kg|rpm|RPM|V|A|W|kW|hrs?|°C|°F)?\b")
 
 def _unsupported_numbers(answer: str, evidence: str) -> list[str]:
-    """Finds numbers in the answer that have units or percentages and do not appear in evidence."""
     ev = evidence.replace(",", "")
     unsupported = []
     for m in _NUMBER_RE.finditer(answer):
@@ -199,7 +172,6 @@ def evaluate_faithfulness(
     citations: list[str] | None = None,
     expected_abstain: bool = False
 ) -> dict:
-    """Evaluates the proportion of factual statements supported by the retrieved context."""
     if not answer.strip():
         return {"faithfulness": 1.0, "hallucination_rate": 0.0, "supported_claims": 0, "total_claims": 0, "unsupported_numbers": [], "unverified_citations": []}
 
@@ -225,7 +197,7 @@ def evaluate_faithfulness(
     evidence_text = "\n".join(c.get("text", "") for c in context_chunks)
     evidence_lower = evidence_text.lower()
 
-    # Strip bracketed citations before sentence splitting so citation tags are not counted as standalone factual claims
+
     answer_clean = re.sub(r"\[[^\]]+:\d+\]", "", answer).strip()
     sentences = [s.strip() for s in _SENTENCE_SPLIT.split(answer_clean) if len(s.strip()) > 10]
     if not sentences:
@@ -280,12 +252,7 @@ def evaluate_faithfulness(
     }
 
 
-# ---------------------------------------------------------------------------
-# Metric 4: Response Time Aggregations
-# ---------------------------------------------------------------------------
-
 def calculate_time_statistics(latencies: list[float]) -> dict:
-    """Computes mean, median (P50), P90, P95, min, and max latency in milliseconds."""
     if not latencies:
         return {"mean_ms": 0.0, "median_ms": 0.0, "p90_ms": 0.0, "p95_ms": 0.0, "min_ms": 0.0, "max_ms": 0.0}
 
@@ -310,20 +277,14 @@ def calculate_time_statistics(latencies: list[float]) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Dynamic Question-Answer Generation from Uploaded PDFs
-# ---------------------------------------------------------------------------
-
 def extract_qa_from_pdf_text(text: str, filename: str, max_questions: int = 10) -> list[dict]:
-    """Dynamically extracts grounded questions, reference answers, and key facts directly
-    from the raw text of an uploaded PDF without using any dummy or mock data."""
     qa_items = []
     seen_queries = set()
 
-    # Split into clean, non-trivial lines/paragraphs
+
     raw_lines = [line.strip() for line in text.split("\n") if len(line.strip()) >= 20]
-    
-    # 1. Look for sentences containing measurements, figures, or technical numbers
+
+
     num_pattern = re.compile(r"(\b[A-Z0-9][\w\s-]{3,30}?\b)\s*(?:is|was|are|rated at|equals?|reaches?|triggers?|drops? below|of)\s*(\b\d+[\d,]*\.?\d*\s*(?:%|PSI|bar|mm|cm|m|kg|g|rpm|RPM|V|A|W|kW|hours?|hrs?|°C|°F|USD|\$|EUR|€|pages?|items?|units?)?\b)", re.I)
 
     for line in raw_lines:
@@ -333,7 +294,7 @@ def extract_qa_from_pdf_text(text: str, filename: str, max_questions: int = 10) 
         if m:
             subject = m.group(1).strip()
             val = m.group(2).strip()
-            # Clean up subject
+
             subject_clean = re.sub(r"^(the|a|an|in|for|and)\s+", "", subject, flags=re.I).strip()
             if len(subject_clean) >= 3 and len(subject_clean) <= 40:
                 query = f"What is the {subject_clean.lower()} specified in {filename}?"
@@ -350,7 +311,7 @@ def extract_qa_from_pdf_text(text: str, filename: str, max_questions: int = 10) 
                         "expected_abstain": false if 'false' in locals() else False,
                     })
 
-    # 2. Look for definition, role, or concept statements
+
     def_pattern = re.compile(r"(\b[A-Z][\w\s-]{3,35}?\b)\s+(?:is defined as|refers to|is designed for|is used to|consists of|responsible for)\s+(.+)", re.I)
 
     for line in raw_lines:
@@ -375,7 +336,7 @@ def extract_qa_from_pdf_text(text: str, filename: str, max_questions: int = 10) 
                         "expected_abstain": False,
                     })
 
-    # 3. Look for requirements, directives, or action steps
+
     action_pattern = re.compile(r"(?:must|should|required to|procedure for)\s+([^.]+)", re.I)
     for line in raw_lines:
         if len(qa_items) >= max_questions - 1:
@@ -397,14 +358,14 @@ def extract_qa_from_pdf_text(text: str, filename: str, max_questions: int = 10) 
                     "expected_abstain": False,
                 })
 
-    # 4. Fallback to prominent informative sentences if fewer than 4 questions extracted
+
     if len(qa_items) < 4:
         for line in raw_lines:
             if len(qa_items) >= max_questions - 1:
                 break
             words = line.split()
             if 6 <= len(words) <= 25 and not line.endswith("?"):
-                # Formulate a topic question from the first few words
+
                 topic = " ".join(words[:4])
                 query = f"What does {filename} state regarding {topic}?"
                 if query not in seen_queries:
@@ -420,7 +381,7 @@ def extract_qa_from_pdf_text(text: str, filename: str, max_questions: int = 10) 
                         "expected_abstain": False,
                     })
 
-    # 5. Always include an unanswerable question (Negative control to evaluate hallucination prevention)
+
     absent_query = f"What is the standard commercial warranty period for the hypothetical Model Z9000 mentioned in {filename}?"
     qa_items.append({
         "id": f"pdf-q{len(qa_items)+1:02d}",
@@ -437,18 +398,17 @@ def extract_qa_from_pdf_text(text: str, filename: str, max_questions: int = 10) 
 
 
 def get_indexed_pdf_sources() -> list[dict]:
-    """Finds all PDF files that have been uploaded or indexed into Ada's database."""
     import store
     conn = store.connect()
     try:
-        # Check files table (uses 'path', derive filename from basename)
+
         rows = conn.execute(
             "SELECT path FROM files WHERE ext = 'pdf' AND state = 'indexed'"
         ).fetchall()
         if rows:
             return [{"path": r["path"], "filename": os.path.basename(r["path"])} for r in rows]
 
-        # Check chunks table directly
+
         chunk_rows = conn.execute(
             "SELECT DISTINCT path, filename FROM chunks WHERE filename LIKE '%.pdf'"
         ).fetchall()
@@ -458,7 +418,6 @@ def get_indexed_pdf_sources() -> list[dict]:
 
 
 def generate_qa_dataset_from_uploaded_pdfs(specific_pdf_path: str | None = None) -> tuple[list[dict], str]:
-    """Generates the Q&A benchmark directly from user's uploaded/indexed PDFs."""
     from extract import extract
 
     pdf_sources = []
@@ -473,11 +432,11 @@ def generate_qa_dataset_from_uploaded_pdfs(specific_pdf_path: str | None = None)
     all_qa = []
     source_name = pdf_sources[0]["filename"]
 
-    for src in pdf_sources[:3]:  # evaluate across up to 3 uploaded PDFs
+    for src in pdf_sources[:3]:
         path = src["path"]
         fn = src["filename"]
 
-        # Collect text from the PDF
+
         text = ""
         if os.path.exists(path):
             try:
@@ -486,7 +445,7 @@ def generate_qa_dataset_from_uploaded_pdfs(specific_pdf_path: str | None = None)
             except Exception as e:
                 log.warning("Could not extract from %s: %s", path, e)
 
-        # Fallback to reading extracted chunks from SQLite if file path was a temp upload
+
         if not text:
             import store
             conn = store.connect()
@@ -505,12 +464,7 @@ def generate_qa_dataset_from_uploaded_pdfs(specific_pdf_path: str | None = None)
     return all_qa, source_name
 
 
-# ---------------------------------------------------------------------------
-# Answer Generation
-# ---------------------------------------------------------------------------
-
 def _deterministic_embed(texts: list[str]) -> list[list[float]]:
-    """Generates deterministic pseudo-embeddings for offline benchmark runs."""
     dims = 768
     try:
         col = retrieve.collection()
@@ -540,7 +494,6 @@ def generate_answer_for_query(
     is_online: bool,
     expected_abstain: bool
 ) -> tuple[str, list[str]]:
-    """Generates a grounded answer for the query using retrieved hits and LLM."""
     if expected_abstain:
         return "The provided document does not contain information to answer this question.", []
 
@@ -632,22 +585,17 @@ def generate_answer_for_query(
     return f"{top_hit.get('text', '').strip()[:200]} {citation}", [citation]
 
 
-# ---------------------------------------------------------------------------
-# Main Evaluation Execution
-# ---------------------------------------------------------------------------
-
 def run_rag_evaluation(
     pdf_path: str | None = None,
     offline: bool = False,
     output_path: Path | None = DEFAULT_RESULTS,
     quiet: bool = False,
 ) -> dict:
-    """Executes the RAG evaluation suite directly on uploaded PDFs."""
     import config
     import retrieve
     from permissions import grant_folder
 
-    # Online check: verifies NVIDIA API Key is present and reachable
+
     is_online = False
     if not offline:
         api_key = os.getenv("NVIDIA_API_KEY") or os.getenv("CHAT_API_KEY")
@@ -663,13 +611,13 @@ def run_rag_evaluation(
         config.embed_texts = _deterministic_embed
         retrieve.embed_texts = _deterministic_embed
 
-    # 1. Discover or ingest the specified PDF
+
     if pdf_path and os.path.exists(pdf_path):
         import index
         grant_folder(os.path.dirname(os.path.abspath(pdf_path)))
         index.index_file(pdf_path)
 
-    # 2. Extract dynamic Q&A dataset from the actual uploaded PDFs
+
     qa_set, source_desc = generate_qa_dataset_from_uploaded_pdfs(pdf_path)
 
     if not qa_set:
@@ -711,14 +659,14 @@ def run_rag_evaluation(
         gt_snippets = item.get("ground_truth_snippets", [])
         expected_abstain = item.get("expected_abstain", False)
 
-        # 1. Retrieval
+
         t_ret_start = time.perf_counter()
         hits = retrieve.search(query, k=6)
         ret_ms = (time.perf_counter() - t_ret_start) * 1000.0
 
         ret_metrics = evaluate_retrieval(hits, gt_doc, gt_snippets)
 
-        # 2. Generation
+
         t_gen_start = time.perf_counter()
         answer, citations = generate_answer_for_query(query, hits, is_online, expected_abstain)
         gen_ms = (time.perf_counter() - t_gen_start) * 1000.0
@@ -729,10 +677,10 @@ def run_rag_evaluation(
         all_generation_latencies.append(gen_ms)
         all_total_latencies.append(total_ms)
 
-        # 3. Correctness
+
         correctness_metrics = evaluate_correctness(answer, ref, facts, expected_abstain)
 
-        # 4. Faithfulness
+
         faithfulness_metrics = evaluate_faithfulness(answer, hits, citations, expected_abstain)
 
         case_summary = {
@@ -769,7 +717,7 @@ def run_rag_evaluation(
                 f"{query[:42]}..."
             )
 
-    # Aggregate Metrics Calculation
+
     retrieval_cases = [r for r in results_per_case if not r["retrieval"]["is_out_of_corpus"]]
     n_ret = max(len(retrieval_cases), 1)
     n_cases = len(results_per_case)

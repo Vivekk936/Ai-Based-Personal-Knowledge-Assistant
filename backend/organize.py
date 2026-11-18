@@ -1,9 +1,3 @@
-"""Rule-based, zero-model organization suggestions: categorize loose files by
-extension, flag exact duplicates (size match, then a cheap partial hash), flag
-stale files by age. Pure metadata + hashing only within same-size groups — no
-embeddings, no LLM calls. Organizing doesn't need understanding, just honest
-heuristics, and that's what keeps it instant and free to run.
-"""
 import hashlib
 import logging
 import os
@@ -22,8 +16,7 @@ STALE_DAYS = 365
 MAX_FILES_FOR_DEDUP = 3000
 MAX_SUGGESTIONS = 500
 
-# Comprehensive categories covering PDFs, documents, spreadsheets, media, code,
-# archives, executables, and miscellaneous ("other") files.
+
 CATEGORIES = {
     "PDFs": {"pdf"},
     "Documents": {"doc", "docx", "txt", "md", "rtf", "odt", "epub", "pages", "tex", "wpd", "log"},
@@ -43,7 +36,6 @@ CATEGORIES = {
 
 
 def _category(ext: str) -> str:
-    """Matches any file extension to a logical category, returning 'Other' for anything else."""
     ext_clean = ext.lower().lstrip(".")
     for name, exts in CATEGORIES.items():
         if ext_clean in exts:
@@ -62,15 +54,13 @@ def _partial_hash(path: str, chunk: int = 65536) -> str:
 
 
 def suggest(root: str) -> dict:
-    """Inspects a granted directory and suggests non-destructive moves for all file types
-    (including PDFs, Office documents, media, code, and other loose files)."""
     if not is_allowed(root):
         raise PermissionError(f"{root} was not granted to Ada")
 
     root = os.path.abspath(root)
     files = list_files(root)
 
-    # Fallback to direct directory scan if database has not catalogued this folder yet
+
     if not files:
         files = []
         for dirpath, dirnames, filenames in os.walk(root):
@@ -86,7 +76,7 @@ def suggest(root: str) -> dict:
 
     now = time.time()
 
-    # Duplicate detection within same-size groups
+
     duplicate_paths: set[str] = set()
     if len(files) <= MAX_FILES_FOR_DEDUP:
         by_size = defaultdict(list)
@@ -100,7 +90,7 @@ def suggest(root: str) -> dict:
                 by_hash[_partial_hash(f["path"])].append(f["path"])
             for paths in by_hash.values():
                 if len(paths) > 1:
-                    duplicate_paths.update(paths[1:])  # flag redundant copies
+                    duplicate_paths.update(paths[1:])
 
     rows = []
     category_dirs = set(CATEGORIES.keys()) | {"Other"}
@@ -117,7 +107,7 @@ def suggest(root: str) -> dict:
         if path in duplicate_paths:
             reasons.append("likely duplicate (review before deleting manually)")
         elif rel_parent == "." or rel_parent not in category_dirs:
-            # File is loose in the root directory or in an unsorted directory
+
             dest = os.path.join(root, category, os.path.basename(path))
             if dest != path:
                 reasons.append(f"categorize -> {category}")
@@ -142,9 +132,6 @@ def suggest(root: str) -> dict:
 
 
 def apply_moves(rows: list[dict]) -> dict:
-    """Applies only rows where suggested_destination differs from path. Never touches
-    duplicates (those stay flag-only), never overwrites an existing file, and re-checks
-    each source still exists right before moving it."""
     log_path = DATA_DIR / "applied_moves.csv"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     applied, skipped, errors = 0, 0, []

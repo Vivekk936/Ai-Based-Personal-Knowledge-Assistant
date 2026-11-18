@@ -1,15 +1,3 @@
-"""Turning extracted pages into retrievable chunks.
-
-Two rules do most of the work here, and both come from the same observation: a chunk is
-useless if the reader can't tell what it's about.
-
-  1. Split on real boundaries (blank line, then sentence, then whitespace) rather than at
-     a fixed character offset, so a chunk doesn't begin mid-word and end mid-number.
-  2. Give every chunk a deterministic context line — file, section, page — at embed time.
-     This is the free 80% of "contextual retrieval": the expensive version pays an LLM
-     call per chunk to write a summary, and most of what that summary conveys is simply
-     which document and which section the text came from.
-"""
 import re
 try:
     from config import CHUNK_OVERLAP, CHUNK_SIZE
@@ -23,8 +11,8 @@ MIN_CHUNK_CHARS = 60
 
 _PARA = re.compile(r"\n\s*\n")
 _SENT = re.compile(r"(?<=[.!?])\s+")
-# A row from a rendered table or a spreadsheet row-group. Splitting one of these in half
-# produces two chunks that are both lies, so they're kept whole even when oversized.
+
+
 _ROWISH = re.compile(r"^\s*(\||[^:\n]{1,60}:\s)", re.M)
 
 
@@ -33,8 +21,6 @@ def _split_oversized(
     target_chars: int | None = None,
     overlap_chars: int | None = None,
 ) -> list[str]:
-    """Break a too-long block at the best boundary available, preferring sentence ends
-    and falling back to whitespace. Hard character slicing is the last resort."""
     target = target_chars or TARGET_CHARS
     overlap = overlap_chars if overlap_chars is not None else OVERLAP_CHARS
     if len(text) <= target:
@@ -62,9 +48,6 @@ def chunk_page(
     target_chars: int | None = None,
     overlap_chars: int | None = None,
 ) -> list[str]:
-    """Paragraph-packing: accumulate whole paragraphs until adding the next would
-    overshoot, then emit. Keeps related prose together instead of slicing every
-    TARGET_CHARS regardless of meaning."""
     text = (text or "").strip()
     if not text:
         return []
@@ -72,9 +55,7 @@ def chunk_page(
     target = target_chars or TARGET_CHARS
     overlap = overlap_chars if overlap_chars is not None else OVERLAP_CHARS
 
-    # Tables and spreadsheet row-groups arrive pre-structured from extract.py and are
-    # already sized by the extractor. Re-packing them would interleave rows from
-    # different logical groups, so they pass through whole.
+
     if kind in ("table", "sheet") or len(_ROWISH.findall(text)) > 3:
         return _split_on_lines(text)
 
@@ -102,9 +83,6 @@ def chunk_page(
 
 
 def _split_on_lines(text: str) -> list[str]:
-    """Row-preserving split: fill up to TARGET_CHARS with whole lines, and if the block
-    has a header line, repeat it in every chunk so a hit on row 400 still knows its
-    column names."""
     lines = text.split("\n")
     header = lines[0] if lines and len(lines[0]) < 200 else ""
     chunks, buf = [], []
@@ -122,8 +100,6 @@ def _split_on_lines(text: str) -> list[str]:
 
 
 def _merge_runts(chunks: list[str]) -> list[str]:
-    """A 20-character trailing chunk retrieves badly and wastes an embedding, so fold it
-    into its neighbour."""
     out: list[str] = []
     for c in chunks:
         if out and len(c) < MIN_CHUNK_CHARS:
@@ -142,8 +118,6 @@ def context_line(filename: str, section: str, page: int) -> str:
 
 
 def embed_input(filename: str, section: str, page: int, text: str) -> str:
-    """What actually gets embedded. The raw text is what's stored and shown, so citations
-    quote the document rather than our breadcrumb."""
     return f"{context_line(filename, section, page)}\n{text}"
 
 

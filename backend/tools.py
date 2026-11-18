@@ -1,26 +1,3 @@
-"""The agent's tools.
-
-Three rules shape every function here, all of them consequences of driving an 8B local
-model rather than a frontier one:
-
-  1. **A tool never raises.** It returns a string telling the model what to do next. An
-     exception ends the turn and the user sees nothing; a good error message is a free
-     retry. Every failure message contains the schema or the valid options, so the model
-     only has to copy, not remember.
-
-  2. **Every output has a hard cap, and truncation is announced with the true size.** A
-     model that knows it saw 200 of 1,847 lines will paginate. A model that thinks it saw
-     the whole file will confidently make up the rest.
-
-  3. **Eight tools, and reads are cheap two-hop.** Tool-selection accuracy falls off
-     sharply past ~10 tools for small models. search_documents returns snippets, not full
-     passages — reconnaissance first, then read_chunk for the two or three that matter.
-
-Path access is checked against the granted-folder allow-list on every call, including the
-read-only ones. Document contents are untrusted data: a PDF that says "ignore previous
-instructions" is the realistic attack here, so retrieved text is always delimited and
-labelled as data in the prompt.
-"""
 import json
 import logging
 import os
@@ -42,7 +19,6 @@ MAX_GREP_HITS = 40
 MAX_DIR_ENTRIES = 200
 
 
-
 def _denied(path: str) -> str:
     roots = list_granted()
     return (
@@ -52,13 +28,7 @@ def _denied(path: str) -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# Retrieval — two hops
-# ---------------------------------------------------------------------------
-
-
 def search_documents(query: str, k: int = 6, filename: str = "") -> str:
-    """Hop one: cheap reconnaissance over the index."""
     k = max(1, min(int(k or 6), 15))
     fn = filename.strip() or None
     hits = search(query, k=k, filename=fn)
@@ -91,8 +61,6 @@ def search_documents(query: str, k: int = 6, filename: str = "") -> str:
 
 
 def read_chunks(chunk_ids: list[str] | str) -> str:
-    """Read the full text of multiple search results at once. Useful for inspecting
-    multiple relevant sections in a single step."""
     if isinstance(chunk_ids, str):
         ids = [c.strip() for c in re.split(r"[,;\s]+", chunk_ids) if c.strip()]
     elif isinstance(chunk_ids, list):
@@ -128,7 +96,6 @@ def read_chunks(chunk_ids: list[str] | str) -> str:
 
 
 def read_chunk(chunk_id: str) -> str:
-    """Hop two: the full passage behind one search result."""
     if not chunk_id:
         return "chunk_id is required."
     cids = [c.strip() for c in re.split(r"[,;\s]+", str(chunk_id)) if c.strip()]
@@ -152,15 +119,7 @@ def read_chunk(chunk_id: str) -> str:
     return f"{head}\n<document_text>\n{text}{note}\n</document_text>"
 
 
-# ---------------------------------------------------------------------------
-# Filesystem traversal
-# ---------------------------------------------------------------------------
-
-
 def list_folder(path: str = "", pattern: str = "") -> str:
-    """Folder listing. Filenames, sizes and folder structure are relevance signal the
-    model gets for free — 'Q3_Budget_FINAL.xlsx' in '\\Finance\\2025\\Approved' says more
-    per token than 500 characters of its contents."""
     roots = list_granted()
     if not path:
         if not roots:
@@ -200,9 +159,6 @@ def list_folder(path: str = "", pattern: str = "") -> str:
 
 
 def read_file(path: str, offset: int = 0, limit: int = MAX_FILE_LINES) -> str:
-    """Raw file read by line range. For indexed documents prefer search_documents +
-    read_chunk; this is for files the index doesn't cover, or for checking something
-    exactly as written."""
     path = os.path.abspath(path)
     if not is_allowed(path):
         return _denied(path)
@@ -230,8 +186,6 @@ def read_file(path: str, offset: int = 0, limit: int = MAX_FILE_LINES) -> str:
 
 
 def grep_files(pattern: str, path: str = "", max_results: int = MAX_GREP_HITS) -> str:
-    """Literal/regex search across granted folders. Cheap reconnaissance: returns where
-    matches are, not the surrounding context, so the first hop stays small."""
     roots = [os.path.abspath(path)] if path else list_granted()
     if path and not is_allowed(roots[0]):
         return _denied(path)
@@ -260,7 +214,7 @@ def grep_files(pattern: str, path: str = "", max_results: int = MAX_GREP_HITS) -
                         for n, line in enumerate(f, 1):
                             if rx.search(line):
                                 hits.append(f"{fp}:{n}: {line.strip()[:160]}")
-                                break  # one hit per file keeps reconnaissance cheap
+                                break
                 except OSError:
                     continue
             if capped:
@@ -278,14 +232,7 @@ _TEXTY = {"txt", "md", "log", "csv", "tsv", "json", "yaml", "yml", "xml", "html"
           "php", "sh", "sql", "ini", "cfg", "conf", "toml"}
 
 
-# ---------------------------------------------------------------------------
-# Working state and deliverables
-# ---------------------------------------------------------------------------
-
-
 def write_note(text: str) -> str:
-    """The agent's scratchpad. Findings written here survive context compaction, because
-    they live on disk rather than in the transcript."""
     from harness import current_run_dir
 
     d = current_run_dir()
@@ -295,13 +242,6 @@ def write_note(text: str) -> str:
 
 
 def write_deliverable(kind: str, filename: str, spec: str = "") -> str:
-    """Produce a real file. `spec` is JSON; see deliver.py for each kind's shape.
-
-    Deliberately one coarse tool rather than create/add_heading/add_row/save: a small
-    model gets a five-call stateful sequence wrong often enough that it regularly leaves
-    a half-written, corrupt file behind. One validated call either works or fails
-    cleanly with a message it can act on.
-    """
     kind = (kind or "").lower().strip()
     valid = ("xlsx", "docx", "pptx", "md")
     if kind not in valid:
@@ -319,10 +259,8 @@ def write_deliverable(kind: str, filename: str, spec: str = "") -> str:
         try:
             payload = json.loads(text, strict=False)
         except (TypeError, json.JSONDecodeError) as e:
-            # Prose formats accept Markdown directly. Requiring JSON here means every
-            # apostrophe, quote and newline in a letter is a chance to emit invalid JSON,
-            # and a complete, well-written application was being discarded over a single
-            # unescaped quote. Markdown is what these models are best at, so take it.
+
+
             if kind in PROSE_KINDS:
                 payload = deliver.spec_from_markdown(text, kind)
             else:
@@ -332,15 +270,15 @@ def write_deliverable(kind: str, filename: str, spec: str = "") -> str:
                     f"Example for {kind}: {_SPEC_EXAMPLES[kind]}"
                 )
         else:
-            # Valid JSON that is merely a quoted string is still prose, not a spec.
+
             if isinstance(payload, str) and kind in PROSE_KINDS:
                 payload = deliver.spec_from_markdown(payload, kind)
             elif not looks_json and kind in PROSE_KINDS:
                 payload = deliver.spec_from_markdown(text, kind)
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    # Models routinely pass a bare stem ("parts"), which would write an extensionless file
-    # Windows can't open in Excel. The kind already says what it is, so fix it silently.
+
+
     name = os.path.basename(filename or "").strip() or f"output.{kind}"
     if not name.lower().endswith(f".{kind}"):
         name = f"{os.path.splitext(name)[0]}.{kind}"
@@ -354,8 +292,6 @@ def write_deliverable(kind: str, filename: str, spec: str = "") -> str:
         return f"Could not write {path}: {e}"
 
 
-# Shown verbatim in every failure message, so each is a complete, valid spec the model
-# can copy and adapt rather than a schema it has to interpret.
 PROSE_KINDS = ("docx", "md", "pptx")
 
 _SPEC_EXAMPLES = {
@@ -434,12 +370,8 @@ TOOL_SCHEMAS = [
             "document, PowerPoint deck or Markdown. Write the full content in this one call.",
             {"kind": {"type": "string", "enum": ["xlsx", "docx", "pptx", "md"]},
              "filename": {"type": "string", "description": "e.g. q3_summary.xlsx"},
-             # A STRING, deliberately, even though the value is JSON. Declaring this as
-             # {"type": "object"} is avoided because some tool-call parsers drop any call
-             # whose arguments contain a nested object, returning an empty message with no
-             # content and no tool_calls.
-             # Do not change this back without validation. The parsing this costs us is handled in deliver.py, which
-             # accepts every spec shape a model plausibly emits.
+
+
              "spec": {"type": "string",
                       "description": "the content. For docx/md/pptx just write plain Markdown "
                                      "(headings, paragraphs, - bullets, | tables |) — no JSON "
@@ -457,21 +389,19 @@ def demo() -> None:
 
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 
-    # A bare stem must still produce a file Excel can open.
+
     out = write_deliverable("xlsx", "parts", json.dumps(
         {"columns": ["Part", "Qty"], "rows": [["BOLT-M12", 40], ["BOLT-M8", 25]]}))
     assert out.startswith("Wrote"), out
     written = glob.glob(os.path.join(OUTPUT_DIR, "*"))
     assert [os.path.basename(p) for p in written] == ["parts.xlsx"], written
 
-    # Headers with no data must be refused, not written as an empty file the model then
-    # claims is full — this was a real failure observed end to end.
+
     empty = write_deliverable("xlsx", "empty.xlsx", json.dumps({"columns": ["Part", "Qty"]}))
     assert "no rows" in empty and "would" in empty, empty
     assert not os.path.exists(os.path.join(OUTPUT_DIR, "empty.xlsx")), "refused spec must write nothing"
 
-    # Prose kinds take Markdown directly; xlsx still requires JSON, because a sheet is
-    # real structured data and Markdown would lose the column types.
+
     md_out = write_deliverable("docx", "letter", "# Request\n\nDear Sir,\n\nI can't pay the \"fee\".")
     assert md_out.startswith("Wrote"), md_out
     assert os.path.exists(os.path.join(OUTPUT_DIR, "letter.docx"))

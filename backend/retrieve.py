@@ -1,17 +1,3 @@
-"""Hybrid retrieval: dense vectors for meaning, BM25 for exact strings, fused with
-Reciprocal Rank Fusion.
-
-Dense-only retrieval fails silently and confidently on exactly the queries an enterprise
-cares about. Ask for "DWG-11482 rev C" and an embedding model — which was trained to
-generalise across surface form — happily returns DWG-11483, because to it those strings
-are near-identical. It always returns *something*, so the user gets a fluent wrong answer
-rather than a miss, which is the worst failure mode a document assistant can have.
-BM25 is the half that matches literal tokens.
-
-Fusion is RRF rather than weighted score blending because BM25 scores and cosine
-distances don't share an axis; normalising them into one requires per-corpus tuning we
-have no labelled data to do. RRF only needs rank order, so it has nothing to tune.
-"""
 import logging
 
 import chromadb
@@ -22,13 +8,12 @@ from chunker import embed_input
 
 log = logging.getLogger("ada.retrieve")
 
-# ponytail: Chroma holds the whole index in RSS (~6.5GB at 1M chunks). Fine for a granted
-# folder or two; swap to LanceDB if a customer indexes a corpus past ~500k chunks.
+
 _CHROMA_PATH = str(store.DATA_DIR / "vectors")
 _client = None
 _collection = None
 
-RRF_K = 60  # standard constant; damps the influence of any single list's top rank
+RRF_K = 60
 
 
 def collection():
@@ -40,9 +25,6 @@ def collection():
 
 
 def index_chunks(rows: list[dict], clear_first: bool = True) -> int:
-    """Writes chunks to both halves of the index. SQLite first: it owns the text, and a
-    vector with no text behind it is unciteable, whereas text with no vector is still
-    reachable by BM25. Ordering the failure that way keeps a crash recoverable."""
     if not rows:
         return 0
     path = rows[0]["path"]
@@ -121,9 +103,6 @@ def search_dense(query: str, k: int = 30, filename: str | None = None) -> list[t
 
 
 def search(query: str, k: int = 6, candidates: int = 30, filename: str | None = None) -> list[dict]:
-    """Returns fused hits, best first. Each carries `rrf` (fusion score) and the ranks it
-    came from, because `dense_rank is None` is a useful signal on its own — it means the
-    only reason this hit surfaced is a literal string match."""
     dense = search_dense(query, candidates, filename=filename)
     lexical = store.search_lexical(query, candidates, filename=filename)
     if not dense and not lexical:
@@ -144,7 +123,7 @@ def search(query: str, k: int = 6, candidates: int = 30, filename: str | None = 
     for cid in top:
         rec = records.get(cid)
         if not rec:
-            continue  # vector index outlived its text (interrupted re-index); skip, don't crash
+            continue
         hits.append(
             {
                 **rec,
@@ -158,10 +137,6 @@ def search(query: str, k: int = 6, candidates: int = 30, filename: str | None = 
     return hits
 
 
-# Both retrievers independently ranking a chunk highly is the strongest cheap signal that
-# it is genuinely relevant. Neither putting anything near the top is the strongest signal
-# that the corpus simply doesn't contain the answer — which is when the agent must say so
-# instead of writing something plausible.
 def confidence(hits: list[dict]) -> str:
     if not hits:
         return "none"
@@ -176,7 +151,6 @@ def confidence(hits: list[dict]) -> str:
 
 
 def demo() -> None:
-    """Exercises fusion arithmetic without needing a model or a populated index."""
     d = [("a", 0.1), ("b", 0.2), ("c", 0.9)]
     lx = [("c", -5.0), ("a", -1.0)]
     scores: dict[str, float] = {}

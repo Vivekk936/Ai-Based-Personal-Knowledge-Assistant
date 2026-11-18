@@ -30,14 +30,6 @@ MAX_TITLE_LENGTH = 100
 
 
 def _init_once() -> None:
-    """Journal mode and schema are properties of the database file, so they are set once,
-    at import, rather than on every connection.
-
-    Doing this per-connect was an outright bug: `PRAGMA journal_mode=WAL` needs a brief
-    exclusive lock, so any concurrent reader made it fail with 'database is locked' —
-    which is the traceback in ada.log and a large part of why the app "sometimes didn't
-    work". Running the full schema script on every connect was wasted work on top.
-    """
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30)
     try:
@@ -53,10 +45,10 @@ _init_once()
 
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=30)
-    # Both are per-connection and neither takes a lock. busy_timeout makes a writer wait
-    # its turn instead of failing instantly when another connection holds the write lock.
+
+
     conn.execute("PRAGMA busy_timeout=30000")
-    conn.execute("PRAGMA foreign_keys=ON")  # makes ON DELETE CASCADE actually fire
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
@@ -96,8 +88,8 @@ def add_message(session_id: str, role: str, content: str) -> None:
         "INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
         (session_id, role, content, now),
     )
-    # First message in a session becomes its title — cheap and good enough; no
-    # reason to spend a model call just to summarize a title.
+
+
     title = conn.execute("SELECT title FROM sessions WHERE id = ?", (session_id,)).fetchone()
     if title and title[0] == DEFAULT_TITLE and role == "user":
         conn.execute(
@@ -122,8 +114,8 @@ def rename_session(session_id: str, title: str) -> dict | None:
 
 def delete_session(session_id: str) -> None:
     conn = _connect()
-    # The messages row is removed by ON DELETE CASCADE (foreign_keys=ON above) —
-    # one statement, one transaction, no way for a crash to leave orphaned rows.
+
+
     conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     conn.commit()
     conn.close()

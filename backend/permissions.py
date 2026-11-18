@@ -1,6 +1,3 @@
-"""Folder access allow-list. Ada only ever touches paths under folders the user
-explicitly granted here — nothing is scanned, read, or moved without an explicit grant.
-"""
 import json
 import os
 from pathlib import Path
@@ -55,8 +52,6 @@ def is_allowed(path: str) -> bool:
 
 
 def pick_folder() -> str | None:
-    """Native OS folder picker. Runs on the same machine as the server, so this
-    works even though the UI itself is served over HTTP."""
     import tkinter as tk
     from tkinter import filedialog
 

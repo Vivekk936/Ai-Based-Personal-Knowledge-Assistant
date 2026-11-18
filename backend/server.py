@@ -1,17 +1,3 @@
-"""Local HTTP API for the Ada desktop app. The Electron shell spawns this as a child
-process and talks to it over 127.0.0.1 — nothing here is ever exposed beyond localhost.
-
-Two things changed shape here versus the previous version:
-
-  * **Indexing is no longer part of a request.** It used to run inline with a 20-second
-    budget, so "add a folder" returned an answer that was mostly a lie. Now a scan queues
-    work and returns immediately; a background worker drains the queue and /index/status
-    reports honest progress.
-
-  * **Chat streams.** A local model generating at ~18 tokens/second behind a blocking
-    POST is indistinguishable from a hang. The agent's steps, tool calls and tokens go
-    out as they happen.
-"""
 import asyncio
 import json
 import logging
@@ -48,7 +34,7 @@ log = logging.getLogger("ada.server")
 app = FastAPI(title="Ada backend")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # localhost-only process; no untrusted network exposure
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -56,16 +42,14 @@ app.add_middleware(
 
 @app.on_event("startup")
 def _startup() -> None:
-    # Chunks can outlive their file when a run is interrupted between writing them and
-    # marking the file done. Left behind they are unreachable but still own their ids,
-    # which blocks that document from ever being indexed again.
+
+
     orphans = store.purge_orphan_chunks()
     if orphans:
         log.info("purged %d orphaned chunks", orphans)
     indexer.start()
-    # Pinning the chat model in VRAM costs nothing while idle and saves a ~15s cold load
-    # on the first question. Backgrounded so a slow or absent model server can't stall
-    # the port from opening.
+
+
     asyncio.get_event_loop().run_in_executor(None, warmup)
 
 
@@ -96,12 +80,6 @@ def health():
         "embed_model": EMBED_MODEL,
         "index": indexer.status(),
     }
-
-
-# ---------------------------------------------------------------------------
-# Chat sessions — the frontend only ever references a session_id; the server owns the
-# transcript, so a UI reload or restart never loses history.
-# ---------------------------------------------------------------------------
 
 
 @app.get("/sessions")
@@ -145,7 +123,6 @@ class ChatRequest(BaseModel):
 
 @app.post("/chat")
 def chat(req: ChatRequest):
-    """Blocking chat, kept for scripting and tests. The UI uses /chat/stream."""
     history = chat_store.get_messages(req.session_id)
     result = run_agent(req.message, history=history, session_id=req.session_id, attachments=req.attachments)
     user_entry = req.message
@@ -176,8 +153,8 @@ def chat_stream(req: ChatRequest):
             log.exception("stream failed")
             yield f"data: {json.dumps({'t': 'error', 'message': str(e)})}\n\n"
         finally:
-            # Persist even on an aborted stream, so a cancelled or crashed run still
-            # leaves the user's question (and whatever was produced) in the transcript.
+
+
             user_entry = req.message
             if req.attachments:
                 user_entry += f"\n[Attached: {', '.join(req.attachments)}]"
@@ -192,14 +169,8 @@ def chat_stream(req: ChatRequest):
     )
 
 
-# ---------------------------------------------------------------------------
-# Documents and uploads
-# ---------------------------------------------------------------------------
-
-
 @app.get("/ingest")
 def list_uploaded():
-    """Lists all files in the uploads folder and their indexing status."""
     uploads_dir = store.DATA_DIR / "uploads"
     uploads_dir.mkdir(parents=True, exist_ok=True)
     conn = store.connect()
@@ -221,8 +192,6 @@ def list_uploaded():
 
 @app.post("/ingest")
 async def ingest(files: list[UploadFile] = File(...)):
-    """Uploads documents (PDFs, Office docs, text, etc.), saves them to
-    DATA_DIR/uploads, and synchronously indexes them."""
     uploads_dir = store.DATA_DIR / "uploads"
     uploads_dir.mkdir(parents=True, exist_ok=True)
     grant_folder(str(uploads_dir))
@@ -269,7 +238,6 @@ async def ingest(files: list[UploadFile] = File(...)):
 
 @app.delete("/ingest/{filename}")
 def ingest_delete(filename: str):
-    """Deletes an uploaded file from disk and unindexes it from SQLite and Chroma."""
     uploads_dir = store.DATA_DIR / "uploads"
     target_path = str(uploads_dir / filename)
 
@@ -301,7 +269,7 @@ def ingest_delete(filename: str):
         except Exception:
             pass
 
-    # Invalidate cached eval results if they referenced this file
+
     from eval_rag import DEFAULT_RESULTS
 
     if DEFAULT_RESULTS.exists():
@@ -336,8 +304,6 @@ class FolderRequest(BaseModel):
 
 @app.post("/folders/refresh")
 def folders_refresh(req: FolderRequest):
-    """Queues work and returns at once. The scan itself is metadata-only, so this stays
-    fast even on a folder with hundreds of thousands of files."""
     if not req.folder:
         raise HTTPException(400, "folder is required")
     if req.folder not in list_granted():
@@ -385,15 +351,8 @@ def apply_route(req: ApplyRequest):
     return apply_moves(req.rows)
 
 
-# ---------------------------------------------------------------------------
-# RAG Evaluation Benchmark
-# ---------------------------------------------------------------------------
-
-
 @app.get("/eval/rag")
 def eval_rag_route(offline: bool = False, force_refresh: bool = False, pdf: str | None = None):
-    """Runs or retrieves the latest RAG evaluation benchmark results measuring retrieval
-    accuracy, answer correctness, faithfulness, and response time on uploaded PDFs."""
     from eval_rag import DEFAULT_RESULTS, run_rag_evaluation
 
     if not force_refresh and not pdf and DEFAULT_RESULTS.exists():
@@ -409,7 +368,6 @@ def eval_rag_route(offline: bool = False, force_refresh: bool = False, pdf: str 
 
 @app.post("/eval/rag")
 def eval_rag_post_route(offline: bool = False, pdf: str | None = None):
-    """Triggers a fresh execution of the RAG benchmark suite on uploaded PDFs."""
     from eval_rag import run_rag_evaluation
 
     return run_rag_evaluation(pdf_path=pdf, offline=offline, quiet=True)
@@ -417,7 +375,6 @@ def eval_rag_post_route(offline: bool = False, pdf: str | None = None):
 
 @app.post("/eval/rag/upload")
 async def eval_rag_upload_route(file: UploadFile = File(...)):
-    """Uploads a PDF, indexes it, and immediately evaluates RAG on questions extracted from it."""
     from eval_rag import run_rag_evaluation
 
     uploads_dir = store.DATA_DIR / "uploads"

@@ -1,13 +1,3 @@
-"""Comprehensive tests for Ada enhancements:
-1. Configurable limits and environment variables
-2. Multi-chunk retrieval tool (read_chunks)
-3. Document-scoped search (filename filter)
-4. Incremental chunk storage (append_chunks)
-5. Memory-safe PDF processing
-6. Adaptive agent harness prompt construction & attachment injection
-7. Repeated tool call feedback and recovery
-8. Fallback synthesis on evidence accumulation
-"""
 import os
 import shutil
 import tempfile
@@ -37,7 +27,6 @@ class TestAuditEnhancements(unittest.TestCase):
         conn.close()
 
     def test_configurable_environment_variables(self):
-        """Validates that agent and indexing limits are configurable from config."""
         self.assertGreaterEqual(config.AGENT_MAX_STEPS, 20)
         self.assertGreaterEqual(config.AGENT_WALL_CLOCK_SECONDS, 300)
         self.assertGreaterEqual(config.AGENT_MAX_TOOL_CALLS, 30)
@@ -48,7 +37,6 @@ class TestAuditEnhancements(unittest.TestCase):
         self.assertGreaterEqual(config.EMBED_BATCH_SIZE, 8)
 
     def test_read_chunks_tool(self):
-        """Validates read_chunks can fetch multiple passages simultaneously."""
         test_path = os.path.join(tempfile.gettempdir(), "test_doc.pdf")
         chunks = [
             {"id": "doc1_p1_c0", "path": test_path, "filename": "test_doc.pdf", "page": 1, "text": "Content of passage zero."},
@@ -57,19 +45,19 @@ class TestAuditEnhancements(unittest.TestCase):
         ]
         store.replace_chunks(test_path, chunks)
 
-        # Single chunk
+
         single = read_chunk("doc1_p1_c0")
         self.assertIn("Content of passage zero.", single)
         self.assertIn("test_doc.pdf", single)
 
-        # Multiple chunks via read_chunks
+
         multi = read_chunks(["doc1_p1_c0", "doc1_p2_c0"])
         self.assertIn("Content of passage zero.", multi)
         self.assertIn("Content of passage two.", multi)
         self.assertIn("test_doc.pdf:1", multi)
         self.assertIn("test_doc.pdf:2", multi)
 
-        # Empty and missing IDs
+
         empty_call = read_chunks([])
         self.assertIn("No chunk IDs provided", empty_call)
 
@@ -77,9 +65,8 @@ class TestAuditEnhancements(unittest.TestCase):
         self.assertIn("found in the index", missing)
 
     def test_incremental_append_chunks(self):
-        """Validates that append_chunks writes batches incrementally without clearing previous chunks."""
         test_path = os.path.join(tempfile.gettempdir(), "large_doc.pdf")
-        
+
         batch1 = [
             {"id": "ld_p1_c0", "path": test_path, "filename": "large_doc.pdf", "page": 1, "text": "Page 1 specification."},
         ]
@@ -87,12 +74,12 @@ class TestAuditEnhancements(unittest.TestCase):
             {"id": "ld_p2_c0", "path": test_path, "filename": "large_doc.pdf", "page": 2, "text": "Page 2 hydraulic limits."},
         ]
 
-        # First batch with clear_first=True
+
         store.append_chunks(test_path, batch1, clear_first=True)
         retrieved1 = store.get_chunks(["ld_p1_c0"])
         self.assertEqual(len(retrieved1), 1)
 
-        # Second batch with clear_first=False
+
         store.append_chunks(test_path, batch2, clear_first=False)
         retrieved2 = store.get_chunks(["ld_p1_c0", "ld_p2_c0"])
         self.assertEqual(len(retrieved2), 2)
@@ -100,7 +87,6 @@ class TestAuditEnhancements(unittest.TestCase):
         self.assertEqual(retrieved2["ld_p2_c0"]["text"], "Page 2 hydraulic limits.")
 
     def test_lexical_search_with_filename_filter(self):
-        """Validates that search_lexical respects the optional filename filter."""
         doc_a = os.path.join(tempfile.gettempdir(), "alpha.pdf")
         doc_b = os.path.join(tempfile.gettempdir(), "beta.pdf")
 
@@ -111,20 +97,19 @@ class TestAuditEnhancements(unittest.TestCase):
             {"id": "b_1", "path": doc_b, "filename": "beta.pdf", "page": 1, "text": "Centrifugal pump impeller diameter 220mm."}
         ])
 
-        # Global search finds both
+
         hits_all = store.search_lexical("centrifugal", k=10)
         cids_all = [cid for cid, _ in hits_all]
         self.assertIn("a_1", cids_all)
         self.assertIn("b_1", cids_all)
 
-        # Filtered to alpha.pdf
+
         hits_a = store.search_lexical("centrifugal", k=10, filename="alpha.pdf")
         cids_a = [cid for cid, _ in hits_a]
         self.assertIn("a_1", cids_a)
         self.assertNotIn("b_1", cids_a)
 
     def test_attachment_prompt_injection(self):
-        """Validates that attached document names are formatted cleanly into agent prompt."""
         prompt = format_attached_prompt(
             "What is the torque rating?",
             ["motor_specs.pdf", "gearbox.docx"]
@@ -134,29 +119,27 @@ class TestAuditEnhancements(unittest.TestCase):
         self.assertIn("gearbox.docx", prompt)
         self.assertIn("What is the torque rating?", prompt)
 
-        # Empty attachments should leave prompt unchanged
+
         unchanged = format_attached_prompt("Simple query", [])
         self.assertEqual(unchanged, "Simple query")
         unchanged_none = format_attached_prompt("Simple query", None)
         self.assertEqual(unchanged_none, "Simple query")
 
     def test_tool_call_recovery_and_execution(self):
-        """Validates prose tool call recovery and error handling."""
         call = _call_tool("read_chunks", '{"chunk_ids": ["doc1_p1_c0"]}')
         self.assertIn("Content of passage zero.", call)
 
-        # Tool registration in TOOL_SCHEMAS
+
         tool_names = [t["function"]["name"] for t in TOOL_SCHEMAS]
         self.assertIn("read_chunks", tool_names)
         self.assertIn("search_documents", tool_names)
 
     def test_chunker_configurable_sizing(self):
-        """Validates chunker respects dynamic target chars and overlap."""
         text = "Sentence one. " * 150
         chunks = chunker.chunk_page(text, target_chars=400, overlap_chars=80)
         self.assertGreater(len(chunks), 1)
         for c in chunks:
-            self.assertLessEqual(len(c), 600)  # Reasonably bounded around target
+            self.assertLessEqual(len(c), 600)
 
 
 if __name__ == "__main__":

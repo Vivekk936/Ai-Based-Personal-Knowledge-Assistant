@@ -1,20 +1,3 @@
-"""The background indexer: one throttled worker thread that drains the pending queue.
-
-What this replaces, and why it was the core bug:
-
-The old index_folder() ran inline inside the HTTP request with a 20-second wall-clock
-budget and then gave up. Every model call at the time also paid a 2-second IPv6 stall
-(see config.py), so 20 seconds bought roughly nine files. On any real folder the user
-watched it "finish" having indexed almost nothing, which is exactly the reported
-symptom — not slowness, but silent partial work presented as success.
-
-It also skipped anything over 1MB, which is most real PDFs, and skipped every scanned
-page during folder indexing, which is most engineering drawings and scan reports.
-
-The fix is structural rather than a bigger budget: indexing is a queue, the queue is in
-SQLite, and a worker drains it across restarts. Nothing is ever abandoned — it is either
-done, deliberately skipped with a reason, or still pending.
-"""
 import hashlib
 import logging
 import os
@@ -22,9 +5,8 @@ import threading
 import time
 
 if __name__ == "__main__":
-    # Set before config binds DATA_DIR. The demo indexes fixed content and asserts on the
-    # result, so it needs its own database — run against the real one it both pollutes the
-    # user's index and fails, because their files outrank the demo's.
+
+
     import shutil
     import tempfile
 
@@ -45,40 +27,33 @@ from retrieve import index_chunks
 
 log = logging.getLogger("ada.index")
 
-# Per-file guardrails. Configurable via environment variables.
+
 MAX_PAGES_PER_FILE = 5000
 MAX_CHUNKS_PER_FILE = 10000
 MAX_BYTES_DEFAULT = MAX_UPLOAD_BYTES
 
-# Text formats are cheap per byte; a 50MB wordlist is still 50MB of embeddings
+
 MAX_BYTES_BY_EXT = {"txt": 50_000_000, "log": 20_000_000, "csv": 100_000_000, "json": 50_000_000}
 
-# The throttle. Sleeping a fraction of each file's own processing time keeps the worker
-# at a roughly constant duty cycle rather than a fixed rate: cheap files barely pause,
-# expensive ones yield proportionally more. 0.25 keeps a core ~80% free for the user.
+
 IDLE_FRACTION = float(os.getenv("ADA_INDEX_IDLE_FRACTION", "0.25"))
 POLL_SECONDS = 2.0
 
 
 def _content_hash(pages: list) -> str | None:
-    """Hash extracted text, not raw bytes: two exports of the same document routinely
-    differ byte-for-byte (writers stamp a fresh timestamp and document id on every save),
-    so byte-hashing would almost never catch a real duplicate."""
     combined = "\n".join(p.text for p in pages).strip()
     if len(combined) < 100:
-        return None  # too little text to distinguish two scanned documents from each other
+        return None
     return hashlib.sha256(combined.encode("utf-8", "replace")).hexdigest()
 
 
 def _ocr_page(path: str, page_number: int) -> str:
-    """Rasterise one PDF page and have the vision model read it. Only ever called for
-    pages that have no text layer at all."""
     import pypdfium2 as pdfium
 
     pdf = pdfium.PdfDocument(path)
     try:
-        # 200 DPI: dimension callouts and title-block text on drawings are a few points
-        # at scale and vanish at the 72 DPI default.
+
+
         bitmap = pdf[page_number - 1].render(scale=200 / 72)
         img = bitmap.to_pil()
     finally:
@@ -98,8 +73,8 @@ def _ocr_page(path: str, page_number: int) -> str:
                 "content": [
                     {
                         "type": "text",
-                        # "Transcribe, don't describe" matters on drawings: asked to
-                        # describe, a small VLM invents plausible dimensions fluently.
+
+
                         "text": (
                             "Transcribe all readable text on this page verbatim, including "
                             "table cells, labels and title-block fields. Then list any "
@@ -116,8 +91,6 @@ def _ocr_page(path: str, page_number: int) -> str:
 
 
 def index_file(path: str, *, use_ocr: bool = False, on_progress=None) -> dict:
-    """Extract, chunk, embed and store one file incrementally in page batches.
-    Prevents high memory spikes on large PDFs and allows progress tracking."""
     filename = os.path.basename(path)
     ext = extension_of(path)
     if ext not in SUPPORTED_EXTENSIONS:
@@ -204,7 +177,7 @@ def index_file(path: str, *, use_ocr: bool = False, on_progress=None) -> dict:
 
             first_batch = False
 
-            # Update live indexing progress
+
             store.mark(path, "indexing", pages=total_pages, chunks=total_chunks, doc_id=doc_id)
             if on_progress:
                 on_progress(total_pages, total_chunks)
@@ -226,7 +199,7 @@ def index_file(path: str, *, use_ocr: bool = False, on_progress=None) -> dict:
             "chunks": total_chunks,
         }
 
-    # Dedup check based on text hash
+
     if first_batch_pages:
         content_hash = _content_hash(first_batch_pages)
         if content_hash:
@@ -246,9 +219,6 @@ def index_file(path: str, *, use_ocr: bool = False, on_progress=None) -> dict:
 
 
 class Indexer:
-    """A single worker thread. One, not a pool: the embedding server is the bottleneck and
-    it serialises requests anyway, so extra threads would add contention and CPU load
-    without adding throughput."""
 
     def __init__(self) -> None:
         self._thread: threading.Thread | None = None
@@ -281,7 +251,7 @@ class Indexer:
             row = batch[0]
             path = row["path"]
             if not os.path.exists(path):
-                store.forget(path)  # deleted or moved since the scan; not an error
+                store.forget(path)
                 continue
             self.current = path
             self.current_pages = 0
@@ -294,7 +264,7 @@ class Indexer:
 
             try:
                 result = index_file(path, use_ocr=self.use_ocr, on_progress=on_progress)
-            except Exception as e:  # a single pathological file must never kill the worker
+            except Exception as e:
                 log.exception("indexing %s failed", path)
                 result = {"state": "error", "error": str(e)[:300], "pages": 0, "chunks": 0}
             store.mark(
@@ -325,8 +295,6 @@ indexer = Indexer()
 
 
 def demo() -> None:
-    """Round-trips a real text file through extraction, chunking and the queue. Skips the
-    embedding step if no model server is reachable so the check still runs offline."""
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -342,8 +310,7 @@ def demo() -> None:
         assert index_file(os.path.join(tmp, "nope.exe"))["state"] == "unsupported"
         assert index_file(os.path.join(tmp, "missing.md"))["state"] in ("error", "skipped")
 
-        # A spreadsheet is the case that exposes id collisions: one sheet yields a schema
-        # page plus several row-group pages, all carrying the same sheet index.
+
         import openpyxl
 
         xl = os.path.join(tmp, "inventory.xlsx")
@@ -369,13 +336,11 @@ def demo() -> None:
         rescan = store.scan_folder(tmp, SUPPORTED_EXTENSIONS)
         assert rescan["queued"] == 0, f"unchanged files must not requeue: {rescan}"
 
-        # Two files with identical content must dedup, not collide: doc_id is a hash of
-        # the extracted text, so both copies claim the same chunk ids. 40 duplicate
-        # downloads in a real folder failed exactly this way before this check existed.
+
         twin = os.path.join(tmp, "manual_copy.md")
         with open(twin, "w", encoding="utf-8") as f:
             f.write("# Pump P-101\n\n" + "Maximum operating pressure is 150 PSI. " * 40)
-        store.scan_folder(tmp, SUPPORTED_EXTENSIONS)  # dedup reads the files table
+        store.scan_folder(tmp, SUPPORTED_EXTENSIONS)
         first = index_file(p)
         assert first["state"] == "indexed", first
         store.mark(p, "indexed", doc_id=first["doc_id"], chunks=first["chunks"])

@@ -1,24 +1,9 @@
-"""End-to-end checks for the scan -> index -> retrieve -> cite path.
-
-Deliberately covers the three things that were actually broken rather than the happy path
-that always worked:
-
-  * a document larger than the old 1MB cap is indexed, not silently skipped
-  * an exact part number is retrievable, which dense-only retrieval could not do
-  * a fabricated citation is caught by code, not trusted
-
-Run directly: `..\\.venv\\Scripts\\python.exe test_smoke.py`. Anything needing the
-embedding server is skipped with a clear message when it isn't reachable, so the
-deterministic half still runs offline.
-"""
 import ctypes
 import os
 import shutil
 import tempfile
 
-# Its own database, set before anything imports config. The smoke test indexes documents
-# and asserts on what comes back top-ranked; sharing the real index means whatever the
-# user happens to have indexed decides whether the test passes.
+
 os.environ.setdefault("ADA_DATA_DIR", os.path.join(tempfile.gettempdir(), "ada_smoke_data"))
 shutil.rmtree(os.environ["ADA_DATA_DIR"], ignore_errors=True)
 
@@ -49,8 +34,8 @@ def make_pdf(path: str, lines: list[str], pad_to_bytes: int = 0) -> None:
     doc.save(path)
     doc.close()
     if pad_to_bytes:
-        # PDF readers ignore trailing bytes after %%EOF, so this inflates the file past
-        # the old size cap without disturbing the parsed content.
+
+
         with open(path, "ab") as f:
             f.write(b"\n% " + b"x" * max(0, pad_to_bytes - os.path.getsize(path)))
 
@@ -66,7 +51,6 @@ def embedding_server_up() -> bool:
 
 
 def test_deterministic() -> None:
-    """No model server required."""
     assert _verify_citations("Pressure is 150 PSI [m.pdf:2].", {("m.pdf", "2")}) == []
     assert _verify_citations("Invented [ghost.pdf:9].", {("m.pdf", "2")}) == ["[ghost.pdf:9]"]
 
@@ -99,7 +83,7 @@ def test_pipeline() -> None:
                 f"Pump P-101 maximum operating pressure is {PRESSURE} at the discharge flange.",
                 f"Refer to drawing {PART_NUMBER} for the bearing housing detail.",
             ],
-            pad_to_bytes=1_500_000,  # over the old MAX_INDEXABLE_BYTES of 1,000,000
+            pad_to_bytes=1_500_000,
         )
         assert os.path.getsize(big_pdf) > 1_000_000
 

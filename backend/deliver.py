@@ -1,12 +1,3 @@
-"""Real deliverables — Excel, Word, PowerPoint, Markdown — rendered from a declarative spec.
-
-A local 8B model gets a multi-step stateful API (create -> add_heading -> add_row ->
-save) wrong often enough to leave corrupt half-written files behind, but it emits one
-JSON blob reliably. So the model only ever produces a spec; this module validates it and
-renders it deterministically. Every validation failure is a sentence the model can read
-and act on, never a traceback, and nothing touches the target path until the spec is
-known good — a bad spec must never produce a corrupt file.
-"""
 import os
 import re
 import tempfile
@@ -28,8 +19,8 @@ NUMFMT = {
     "date": "yyyy-mm-dd",
 }
 NUMERIC = ("number", "integer", "currency", "percent")
-# JSON-Schema-ish type words a model writes when it thinks in terms of data types rather
-# than cell formatting. Anything unrecognised falls back to text, which is never wrong.
+
+
 _TYPE_ALIASES = {
     "string": "text", "str": "text", "text": "text",
     "number": "number", "float": "number", "double": "number", "decimal": "number",
@@ -41,17 +32,15 @@ _TYPE_ALIASES = {
 BLOCKS = ("heading", "paragraph", "bullets", "numbered", "table", "pagebreak", "quote")
 LAYOUTS = ("title", "bullets", "table", "text")
 MAX_COL_WIDTH = 60
-# python-pptx has no autofit or reflow: text past the placeholder simply runs off the
-# slide and nobody notices until the meeting. These are the volumes where 18pt stops fitting.
+
+
 MAX_BULLETS = 9
 MAX_BULLET_CHARS = 180
 
 
 class SpecError(ValueError):
-    """Message is guidance aimed at the model that produced the spec, not a stack trace."""
+    pass
 
-
-# ---------------------------------------------------------------- validation helpers
 
 def _obj(spec, kind: str) -> dict:
     if not isinstance(spec, dict):
@@ -60,21 +49,12 @@ def _obj(spec, kind: str) -> dict:
 
 
 def _listify(v) -> list:
-    """A model asked for a list routinely emits the bare item; wrapping it is never ambiguous."""
     if v is None:
         return []
     return list(v) if isinstance(v, (list, tuple)) else [v]
 
 
 def _cell(v):
-    """Unwrap a cell the model described instead of stated.
-
-    Models routinely emit {"value": "BOLT-M12", "formula": false} or {"text": "..."} for a
-    cell. Left alone these get stringified into the sheet, producing a file that reports
-    the right row count and contains "{'formula': False, 'value': 'BOLT-M12'}" — a success
-    that is actually corrupt, which is the worst possible outcome. The wrapper is
-    unambiguous, so unwrap it.
-    """
     if isinstance(v, dict):
         for key in ("value", "text", "content", "v"):
             if key in v:
@@ -88,14 +68,14 @@ def _rows(raw, ncols: int, where: str, headers: list[str] | None = None) -> list
     if not isinstance(raw, (list, tuple)):
         raise SpecError(f"{where}: 'rows' must be a list of rows, e.g. [[\"EMEA\", 1240000]], got {type(raw).__name__}.")
     raw = list(raw)
-    # A single flat row where a list-of-rows was expected is only unambiguous when it
-    # matches the column count exactly; anything else is the model's to fix.
+
+
     if ncols > 1 and raw and not any(isinstance(r, (list, tuple)) for r in raw) and len(raw) == ncols:
         raw = [raw]
     out = []
     for i, row in enumerate(raw):
-        # {"Part": "BOLT-M12", "Qty": 40} is the other shape models reach for, and the
-        # headers tell us the column order unambiguously, so honour it.
+
+
         if isinstance(row, dict) and headers and not any(k in row for k in ("value", "text", "v")):
             lookup = {str(k).strip().lower(): v for k, v in row.items()}
             row = [lookup.get(h.strip().lower()) for h in headers]
@@ -111,8 +91,6 @@ def _rows(raw, ncols: int, where: str, headers: list[str] | None = None) -> list
 
 
 def _flatten(items, where: str) -> list[tuple[int, str]]:
-    """["a", ["sub"], "b"] -> [(0,"a"), (1,"sub"), (0,"b")] — one nesting level, which is
-    all any of the three formats renders anyway."""
     flat = []
     for item in _listify(items):
         if isinstance(item, (list, tuple)):
@@ -139,9 +117,8 @@ def _sheet_name(name, used: set) -> tuple[str, str]:
 
 def _norm_xlsx(spec) -> tuple[list[dict], list[str]]:
     _obj(spec, "xlsx")
-    # A model asked for a one-sheet workbook writes {"columns":…, "rows":…} far more
-    # often than the nested form, and rejecting that costs a whole extra turn on a model
-    # that may not recover. Wrapping it is unambiguous, so meet it where it is.
+
+
     if "sheets" not in spec and ("columns" in spec or "rows" in spec):
         spec = {"sheets": [{k: v for k, v in spec.items() if k != "sheets"}]}
     if "sheets" not in spec or spec["sheets"] is None:
@@ -164,8 +141,8 @@ def _norm_xlsx(spec) -> tuple[list[dict], list[str]]:
         for j, col in enumerate(cols):
             if isinstance(col, str):
                 col = {"header": col}
-            # "name"/"title" for the header and "type" for the format are the spellings a
-            # model reaches for unprompted; both map cleanly onto ours.
+
+
             if isinstance(col, dict) and not col.get("header"):
                 col = {**col, "header": col.get("name") or col.get("title") or ""}
             if isinstance(col, dict) and not col.get("format") and col.get("type"):
@@ -182,10 +159,8 @@ def _norm_xlsx(spec) -> tuple[list[dict], list[str]]:
             notes.append(note)
         data = _rows(sheet.get("rows"), len(norm), f"xlsx spec: sheet {i}",
                      [c["header"] for c in norm])
-        # A sheet with headers and no data is almost never what was asked for; it means
-        # the model described the columns and dropped the values. Writing it anyway
-        # produces an empty file that the model then confidently tells the user is full,
-        # which is far worse than one more turn. Refuse, and say what's missing.
+
+
         if not data:
             raise SpecError(
                 f"xlsx spec: sheet {i} ({name!r}) has columns but no rows, so the file would "
@@ -193,16 +168,14 @@ def _norm_xlsx(spec) -> tuple[list[dict], list[str]]:
                 f"{len(norm)} values each, e.g. "
                 f"{[[c['header'] + '_value' for c in norm]]}."
             )
-        # A column the model didn't type, whose every value is a number, is a number
-        # column. Left as text it lands left-aligned and Excel won't SUM it — a
-        # spreadsheet you can't do arithmetic in isn't really a spreadsheet.
+
+
         for c, col in enumerate(norm):
             if col["explicit"]:
                 continue
             vals = [r[c] for r in data if r[c] not in (None, "")]
-            # A leading zero means it's an identifier, not a quantity — part numbers, zip
-            # codes and account numbers all lose their meaning the moment Excel treats
-            # them as numbers, so those stay text.
+
+
             if any(isinstance(v, str) and len(v) > 1 and v.strip().startswith("0") for v in vals):
                 continue
             nums = [_num(v, "number") for v in vals]
@@ -272,7 +245,7 @@ def _norm_slides(spec) -> list[dict]:
         if not isinstance(slide, dict):
             raise SpecError(f"pptx spec: slide {i} must be an object with 'layout' and 'title', got {type(slide).__name__}.")
         layout = str(slide.get("layout") or "").lower().strip()
-        if not layout:  # inferring from the keys present beats rejecting a usable slide
+        if not layout:
             layout = "bullets" if slide.get("bullets") else "table" if slide.get("headers") else "text" if slide.get("text") else "title"
         if layout not in LAYOUTS:
             raise SpecError(f"pptx spec: slide {i} has unknown layout {layout!r}. Valid layouts: {', '.join(LAYOUTS)}.")
@@ -291,11 +264,7 @@ def _norm_slides(spec) -> list[dict]:
     return out
 
 
-# ---------------------------------------------------------------- writing
-
 def _atomic(path: str, render) -> str:
-    """Render into a temp file beside the target, then os.replace() it in: a crash — or
-    the model retrying the same call — can never leave a half-written .xlsx at `path`."""
     path = os.path.abspath(path)
     parent = os.path.dirname(path) or "."
     os.makedirs(parent, exist_ok=True)
@@ -319,8 +288,6 @@ def _done(path: str, detail: str, notes=()) -> str:
 
 
 def _num(v, fmt: str):
-    """'1,240,000', '$1.2', '(500)' and '31%' are all things a model puts in a numeric
-    column; converting them is safe. Anything else stays text rather than becoming a lie."""
     if isinstance(v, bool):
         return None
     if isinstance(v, (int, float)):
@@ -346,17 +313,10 @@ def _date(v):
         return None
 
 
-
 _MD_TABLE_SEP = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
 
 
 def blocks_from_markdown(text: str) -> list[dict]:
-    """Markdown -> the block vocabulary the docx/md/pptx writers already speak.
-
-    Deliberately small: headings, paragraphs, bullets, numbered lists, block quotes and
-    pipe tables are the whole of what a model writes for a letter, memo or report.
-    Anything unrecognised stays a paragraph, which is always a safe rendering.
-    """
     blocks: list[dict] = []
     lines = str(text).replace("\r\n", "\n").split("\n")
     i = 0
@@ -386,10 +346,10 @@ def blocks_from_markdown(text: str) -> list[dict]:
 
         if stripped in ("---", "***", "___"):
             flush()
-            i += 1  # a horizontal rule has no counterpart in the block vocabulary
+            i += 1
             continue
 
-        # A pipe table needs its separator row to be a table rather than prose.
+
         if stripped.startswith("|") and i + 1 < len(lines) and _MD_TABLE_SEP.match(lines[i + 1]):
             flush()
             cells = lambda r: [c.strip() for c in r.strip().strip("|").split("|")]
@@ -397,8 +357,8 @@ def blocks_from_markdown(text: str) -> list[dict]:
             rows, i = [], i + 2
             while i < len(lines) and lines[i].strip().startswith("|"):
                 row = cells(lines[i])
-                # Pad or trim rather than reject: a ragged row in otherwise good output
-                # should not lose the whole table.
+
+
                 rows.append((row + [""] * len(headers))[: len(headers)])
                 i += 1
             blocks.append({"type": "table", "headers": headers, "rows": rows})
@@ -439,8 +399,6 @@ def blocks_from_markdown(text: str) -> list[dict]:
 
 
 def spec_from_markdown(text: str, kind: str) -> dict:
-    """Wrap Markdown into the spec shape for `kind`. The first heading becomes the title
-    when there is one, so a letter does not end up with a duplicated header."""
     blocks = blocks_from_markdown(text)
     title = ""
     if blocks and blocks[0]["type"] == "heading":
@@ -450,7 +408,7 @@ def spec_from_markdown(text: str, kind: str) -> dict:
         blocks = [{"type": "paragraph", "text": str(text).strip() or "(empty)"}]
 
     if kind == "pptx":
-        # One slide per heading; loose prose before the first heading becomes the opener.
+
         slides, current = [], None
         for b in blocks:
             if b["type"] == "heading":
@@ -522,8 +480,8 @@ def write_xlsx(path: str, spec: dict) -> str:
                     if c == 0 or col["format"] not in NUMERIC:
                         continue
                     letter = xl_col_to_name(c)
-                    # Cache the computed value alongside the formula: Excel recalculates,
-                    # but anything reading the file without a calc engine still sees a number.
+
+
                     ws.write_formula(t, c, f"=SUM({letter}2:{letter}{last + 1})", total_fmts[col["format"]], sums[c])
 
             for c, col in enumerate(cols):
@@ -540,7 +498,7 @@ def write_xlsx(path: str, spec: dict) -> str:
 def _styled(obj, name: str, fallback: str):
     try:
         obj.style = name
-    except KeyError:  # a swapped-in corporate template may not carry the built-in style
+    except KeyError:
         obj.style = fallback
 
 
@@ -681,8 +639,8 @@ def write_md(path: str, spec: dict) -> str:
             lines += [cells(row) for row in block["rows"]] + [""]
 
     text = "\n".join(lines).rstrip() + "\n"
-    # write_text closes the handle before _atomic's os.replace — Windows refuses to
-    # replace a file that is still open.
+
+
     out = _atomic(path, lambda tmp: Path(tmp).write_text(text, encoding="utf-8"))
     return _done(out, f"{len(blocks)} blocks, {len(lines)} lines")
 
@@ -696,8 +654,6 @@ def write(kind: str, path: str, spec: dict) -> str:
         raise SpecError(f"unknown kind {kind!r}. Valid kinds: {', '.join(_WRITERS)}.")
     return writer(path, spec)
 
-
-# ---------------------------------------------------------------- runnable check
 
 def _raises(fn, *needles) -> str:
     try:
@@ -714,7 +670,7 @@ def demo():
 
     out = tempfile.mkdtemp(prefix="ada-deliver-")
 
-    # ---- xlsx
+
     xlsx = os.path.join(out, "q3.xlsx")
     summary = write("xlsx", xlsx, {"sheets": [
         {"name": "Q3 Summary",
@@ -739,8 +695,8 @@ def demo():
     wb.close()
 
     _raises(lambda: write_xlsx(xlsx, {"title": "nope"}), "missing required key 'sheets'")
-    # The shapes a model actually emits for a one-sheet request: no 'sheets' wrapper, and
-    # columns described as {"name", "type"} rather than {"header", "format"}.
+
+
     flat = os.path.join(out, "flat.xlsx")
     write_xlsx(flat, {"columns": [{"name": "Part", "type": "string"},
                                   {"name": "Qty", "type": "int"}],
@@ -751,8 +707,7 @@ def demo():
     assert fws["A2"].value == "BOLT-M12" and fws["B2"].value == 40
     fwb.close()
 
-    # Cells described as objects, and rows keyed by header — both observed from a real
-    # model run, and both previously stringified into the sheet as Python dict reprs.
+
     wrapped = os.path.join(out, "wrapped.xlsx")
     write_xlsx(wrapped, {"columns": ["Part", "Qty"], "rows": [
         [{"formula": False, "value": "BOLT-M12"}, {"value": 40}],
@@ -763,8 +718,7 @@ def demo():
     wwb.close()
     assert got == [("BOLT-M12", 40), ("BOLT-M8", 25)], f"cell/row unwrapping failed: {got}"
 
-    # Untyped all-numeric column becomes a real number column; an identifier with a
-    # leading zero must not, or the part number silently loses it.
+
     ids = os.path.join(out, "ids.xlsx")
     write_xlsx(ids, {"columns": ["Code", "Qty"], "rows": [["007", 5], ["012", 7]]})
     iwb = openpyxl.load_workbook(ids)
@@ -777,7 +731,7 @@ def demo():
             "unknown format 'money'", "currency")
     print("PASS xlsx:", summary)
 
-    # ---- docx
+
     docx_path = os.path.join(out, "review.docx")
     summary = write("docx", docx_path, {"title": "Q3 Review", "subtitle": "Internal", "blocks": [
         {"type": "heading", "level": 2, "text": "Findings"},
@@ -805,7 +759,7 @@ def demo():
             "block 2 has unknown type 'bulletlist'", "heading, paragraph, bullets, numbered, table, pagebreak, quote")
     print("PASS docx:", summary)
 
-    # ---- pptx
+
     pptx_path = os.path.join(out, "deck.pptx")
     summary = write("pptx", pptx_path, {"title": "Q3 Review", "slides": [
         {"layout": "title", "title": "Q3 Review", "subtitle": "Internal"},
@@ -834,7 +788,7 @@ def demo():
     print("PASS pptx:", summary)
     print("PASS pptx overflow guard:", overflow)
 
-    # ---- md
+
     md_path = os.path.join(out, "notes.md")
     summary = write("md", md_path, {"title": "Q3 Review", "blocks": [
         {"type": "heading", "level": 2, "text": "Findings"},
@@ -847,8 +801,8 @@ def demo():
     assert "- EMEA led" in text and "  - Germany +18%" in text
     assert "| Region | Rev |" in text and "| EMEA | 1.2M |" in text
     _raises(lambda: write_md(md_path, {"title": "x", "blocks": [{"type": "bullets", "items": []}]}), "has no items")
-    # ---- Markdown -> blocks. Prose deliverables arrive this way because asking an 8B
-    # model to JSON-escape a letter throws good documents away over one stray quote.
+
+
     md_src = (
         "# Late Fee Waiver\n\n"
         "Respected Sir/Madam,\n\n"
@@ -866,7 +820,7 @@ def demo():
         assert expected in kinds, f"{expected} missing from {kinds}"
     tbl = next(b for b in spec_md["blocks"] if b["type"] == "table")
     assert tbl["headers"] == ["Item", "Value"] and tbl["rows"] == [["Due", "[Date]"]], tbl
-    # Quotes and apostrophes are exactly what broke the JSON path; they must survive.
+
     assert any('"extra"' in b.get("text", "") for b in spec_md["blocks"])
 
     md_doc = os.path.join(out, "from_md.docx")
@@ -876,7 +830,7 @@ def demo():
     assert "[Your Name]" in text and "salary arrives late" in text, text[:200]
     assert len(reread.tables) == 1
 
-    # Plain prose with no Markdown at all is still a valid document, not an error.
+
     plain = spec_from_markdown("Just one line, no markup.", "docx")
     assert plain["blocks"][0]["text"] == "Just one line, no markup."
     assert spec_from_markdown("", "docx")["blocks"], "empty input must still yield a block"
@@ -888,7 +842,7 @@ def demo():
 
     print("PASS md:", summary)
 
-    # ---- dispatch + atomic rewrite
+
     _raises(lambda: write("csv", md_path, {}), "unknown kind 'csv'", "xlsx, docx, pptx, md")
     again = write("xlsx", xlsx, {"sheets": [{"name": "Q3 Summary", "columns": ["Region"], "rows": [["EMEA"]]}]})
     wb = openpyxl.load_workbook(xlsx)
